@@ -1,0 +1,12 @@
+{
+  "name": "cv-admin-react",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "postCreateCommand": "npm install",
+  "forwardPorts": [5173],
+  "customizations": {
+    "vscode": {
+      "extensions": ["dbaeumer.vscode-eslint", "orta.vscode-jest"]
+    }
+  },
+  "remoteUser": "node"
+}
