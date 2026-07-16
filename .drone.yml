@@ -14,6 +14,12 @@ steps:
       - npm run lint
     depends_on: [install]
 
+  - name: typecheck
+    image: node:20
+    commands:
+      - npm run typecheck
+    depends_on: [install]
+
   - name: test
     image: node:20
     commands:
@@ -24,7 +30,7 @@ steps:
     image: node:20
     commands:
       - npm run build
-    depends_on: [lint, test]
+    depends_on: [lint, typecheck, test]
 
 # Placeholder until cv-infra outputs the bucket/distribution IDs:
 # a deploy step syncs dist/ to S3 and invalidates CloudFront on main.
