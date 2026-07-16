@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { peopleApi } from '../api/client';
+import { PersonInput, peopleApi } from '../api/client';
 import { useAuth } from '../auth/CognitoContext';
 
 export default function PersonFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { token } = useAuth();
-  const [form, setForm] = useState({ fullName: '', headline: '', email: '', location: '', summary: '' });
+  const [form, setForm] = useState<PersonInput>({
+    fullName: '',
+    headline: '',
+    email: '',
+    location: '',
+    summary: '',
+  });
 
-  async function handleSubmit(event) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (id) {
       await peopleApi.update(id, form, token);
@@ -19,8 +25,9 @@ export default function PersonFormPage() {
     navigate('/people');
   }
 
-  function handleChange(field) {
-    return (event) => setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  function handleChange(field: keyof PersonInput) {
+    return (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((prev) => ({ ...prev, [field]: event.target.value }));
   }
 
   return (

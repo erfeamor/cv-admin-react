@@ -1,18 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { peopleApi } from '../api/client';
+import { Person, peopleApi } from '../api/client';
 import { useAuth } from '../auth/CognitoContext';
 
 export default function PeopleListPage() {
   const { token } = useAuth();
-  const [people, setPeople] = useState([]);
-  const [error, setError] = useState(null);
+  const [people, setPeople] = useState<Person[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     peopleApi
       .list(token)
       .then(setPeople)
-      .catch((err) => setError(err.message));
+      .catch((err: Error) => setError(err.message));
   }, [token]);
 
   if (error) {
