@@ -1,4 +1,3 @@
-import React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { CognitoProvider } from './auth/CognitoContext';
 import PeopleListPage from './pages/PeopleListPage';

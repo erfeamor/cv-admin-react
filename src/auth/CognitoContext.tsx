@@ -1,16 +1,23 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, ReactNode, useContext, useMemo, useState } from 'react';
 
 /**
  * Placeholder auth context. Swap the internals for the Cognito Hosted UI
  * redirect flow (or amazon-cognito-identity-js) once the user pool exists;
  * consumers only depend on { token, isAuthenticated, login, logout }.
  */
-const CognitoContext = createContext(null);
+export interface AuthContextValue {
+  token: string | null;
+  isAuthenticated: boolean;
+  login: (nextToken: string) => void;
+  logout: () => void;
+}
 
-export function CognitoProvider({ children }) {
-  const [token, setToken] = useState(null);
+const CognitoContext = createContext<AuthContextValue | null>(null);
 
-  const value = useMemo(
+export function CognitoProvider({ children }: { children: ReactNode }) {
+  const [token, setToken] = useState<string | null>(null);
+
+  const value = useMemo<AuthContextValue>(
     () => ({
       token,
       isAuthenticated: Boolean(token),
@@ -23,7 +30,7 @@ export function CognitoProvider({ children }) {
   return <CognitoContext.Provider value={value}>{children}</CognitoContext.Provider>;
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextValue {
   const ctx = useContext(CognitoContext);
   if (!ctx) {
     throw new Error('useAuth must be used within a CognitoProvider');
