@@ -34,15 +34,17 @@ steps:
 
   # VITE_* values are baked in at build time (none are secrets). The empty
   # VITE_DOMAIN_SERVICE_URL makes API calls same-origin, served by
-  # CloudFront's /api/* behavior.
+  # CloudFront's /api/* behavior — it must be exported in commands because
+  # Drone silently drops empty-string values from the environment block,
+  # which let the localhost fallback into a deployed bundle once.
   - name: build
     image: node:20
     environment:
-      VITE_DOMAIN_SERVICE_URL: ""
       VITE_COGNITO_USER_POOL_ID: eu-west-3_0pjSduVeP
       VITE_COGNITO_CLIENT_ID: 9pd7rt69u0072dtg0lbjpqq0q
       VITE_COGNITO_HOSTED_UI_DOMAIN: cv-project-dev.auth.eu-west-3.amazoncognito.com
     commands:
+      - export VITE_DOMAIN_SERVICE_URL=""
       - npm run build
     depends_on: [test]
 
