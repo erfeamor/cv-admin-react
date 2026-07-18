@@ -1,26 +1,8 @@
-import { ReactNode } from 'react';
 import { Route, Routes } from 'react-router-dom';
-import { CognitoProvider, useAuth } from './auth/CognitoContext';
-import PeopleListPage from './pages/PeopleListPage';
-import PersonFormPage from './pages/PersonFormPage';
-
-function AuthGate({ children }: { children: ReactNode }) {
-  const { isAuthenticated, login } = useAuth();
-
-  if (!isAuthenticated) {
-    return (
-      <section>
-        <h1>Admin sign in</h1>
-        <p>Sign in with your Cognito account to manage the CV data.</p>
-        <button type="button" onClick={login}>
-          Sign in
-        </button>
-      </section>
-    );
-  }
-
-  return <>{children}</>;
-}
+import { CognitoProvider } from './auth/CognitoContext';
+import AuthGate from './presentation/components/AuthGate';
+import PeopleListPage from './presentation/pages/PeopleListPage';
+import PersonFormPage from './presentation/pages/PersonFormPage';
 
 export default function App() {
   return (

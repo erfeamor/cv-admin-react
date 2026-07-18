@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
+import { usePeopleStore } from './store';
 
 describe('App', () => {
   const originalFetch = global.fetch;
@@ -8,6 +9,7 @@ describe('App', () => {
   afterEach(() => {
     global.fetch = originalFetch;
     sessionStorage.clear();
+    usePeopleStore.setState({ people: [], selectedPerson: null, loading: false, error: null });
   });
 
   it('shows the sign-in screen when unauthenticated', () => {
