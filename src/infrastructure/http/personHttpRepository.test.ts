@@ -27,6 +27,28 @@ describe('personHttpRepository', () => {
     expect(options.headers.Authorization).toBe('Bearer test-token');
   });
 
+  it('normalizes numeric ids from the API to strings', async () => {
+    // The Java service serializes ids as JSON numbers — the domain requires
+    // strings (URL params compare with ===).
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: 1, fullName: 'Jane Doe', email: 'jane@example.com' }],
+    });
+
+    const people = await repositoryWithToken().list();
+    expect(people[0].id).toBe('1');
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 1, fullName: 'Jane Doe', email: 'jane@example.com' }),
+    });
+
+    const person = await repositoryWithToken().get('1');
+    expect(person.id).toBe('1');
+  });
+
   it('omits the Authorization header without a token', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => [] });
 
