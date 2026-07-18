@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { PersonInput, peopleApi } from '../api/client';
 import { useAuth } from '../auth/CognitoContext';
@@ -7,6 +7,7 @@ export default function PersonFormPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { token } = useAuth();
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<PersonInput>({
     fullName: '',
     headline: '',
@@ -14,6 +15,24 @@ export default function PersonFormPage() {
     location: '',
     summary: '',
   });
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+    peopleApi
+      .get(id, token)
+      .then((person) =>
+        setForm({
+          fullName: person.fullName,
+          headline: person.headline ?? '',
+          email: person.email,
+          location: person.location ?? '',
+          summary: person.summary ?? '',
+        }),
+      )
+      .catch((err: Error) => setError(err.message));
+  }, [id, token]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -28,6 +47,10 @@ export default function PersonFormPage() {
   function handleChange(field: keyof PersonInput) {
     return (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm((prev) => ({ ...prev, [field]: event.target.value }));
+  }
+
+  if (error) {
+    return <p role="alert">Failed to load person: {error}</p>;
   }
 
   return (
