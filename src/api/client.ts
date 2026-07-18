@@ -1,4 +1,6 @@
-const DOMAIN_SERVICE_URL = import.meta.env.VITE_DOMAIN_SERVICE_URL || 'http://localhost:8080';
+// ?? not ||: the deployed build sets this to the empty string on purpose, so
+// requests go same-origin through CloudFront's /api/* behavior.
+const DOMAIN_SERVICE_URL = import.meta.env.VITE_DOMAIN_SERVICE_URL ?? 'http://localhost:8080';
 
 export interface Person {
   id: string;

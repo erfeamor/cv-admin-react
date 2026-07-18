@@ -1,28 +1,114 @@
-import { createContext, ReactNode, useContext, useMemo, useState } from 'react';
+import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { redirectTo } from './browser';
+import { cognitoConfig, redirectUri } from './cognitoConfig';
+import { generateCodeChallenge, generateCodeVerifier } from './pkce';
 
 /**
- * Placeholder auth context. Swap the internals for the Cognito Hosted UI
- * redirect flow (or amazon-cognito-identity-js) once the user pool exists;
- * consumers only depend on { token, isAuthenticated, login, logout }.
+ * Cognito Hosted UI auth via authorization code + PKCE (the app client has no
+ * secret). login() redirects to the Hosted UI; Cognito redirects back to
+ * redirectUri() with ?code=, which the provider exchanges for an access token.
+ * Consumers only depend on { token, isAuthenticated, login, logout }.
  */
 export interface AuthContextValue {
   token: string | null;
   isAuthenticated: boolean;
-  login: (nextToken: string) => void;
+  login: () => void;
   logout: () => void;
 }
 
+const TOKEN_KEY = 'cv-admin.token';
+const EXPIRES_AT_KEY = 'cv-admin.tokenExpiresAt';
+const VERIFIER_KEY = 'cv-admin.pkceVerifier';
+
 const CognitoContext = createContext<AuthContextValue | null>(null);
 
+function storedToken(): string | null {
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  const expiresAt = Number(sessionStorage.getItem(EXPIRES_AT_KEY));
+  return token && expiresAt > Date.now() ? token : null;
+}
+
+async function startLogin(): Promise<void> {
+  const verifier = generateCodeVerifier();
+  sessionStorage.setItem(VERIFIER_KEY, verifier);
+  const params = new URLSearchParams({
+    client_id: cognitoConfig.clientId,
+    response_type: 'code',
+    scope: 'openid email profile',
+    redirect_uri: redirectUri(),
+    code_challenge: await generateCodeChallenge(verifier),
+    code_challenge_method: 'S256',
+  });
+  redirectTo(`https://${cognitoConfig.hostedUiDomain}/oauth2/authorize?${params.toString()}`);
+}
+
+async function exchangeCode(
+  code: string,
+  verifier: string,
+): Promise<{ token: string; expiresAt: number }> {
+  const response = await fetch(`https://${cognitoConfig.hostedUiDomain}/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: cognitoConfig.clientId,
+      code,
+      redirect_uri: redirectUri(),
+      code_verifier: verifier,
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Token exchange failed with status ${response.status}`);
+  }
+
+  const data: { access_token: string; expires_in: number } = await response.json();
+  return { token: data.access_token, expiresAt: Date.now() + data.expires_in * 1000 };
+}
+
 export function CognitoProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(storedToken);
+
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get('code');
+    const verifier = sessionStorage.getItem(VERIFIER_KEY);
+    if (token || !code || !verifier) {
+      return;
+    }
+
+    // Removing the verifier before the exchange makes the effect idempotent:
+    // a re-run (StrictMode double-invoke) finds no verifier and skips instead
+    // of spending the single-use code twice.
+    sessionStorage.removeItem(VERIFIER_KEY);
+    exchangeCode(code, verifier)
+      .then(({ token: nextToken, expiresAt }) => {
+        sessionStorage.setItem(TOKEN_KEY, nextToken);
+        sessionStorage.setItem(EXPIRES_AT_KEY, String(expiresAt));
+        window.history.replaceState({}, '', window.location.pathname);
+        setToken(nextToken);
+      })
+      .catch(() => {
+        // Failed exchange leaves the user on the sign-in screen to retry.
+      });
+  }, [token]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       token,
       isAuthenticated: Boolean(token),
-      login: (nextToken) => setToken(nextToken),
-      logout: () => setToken(null),
+      login: () => {
+        void startLogin();
+      },
+      logout: () => {
+        sessionStorage.removeItem(TOKEN_KEY);
+        sessionStorage.removeItem(EXPIRES_AT_KEY);
+        setToken(null);
+        const params = new URLSearchParams({
+          client_id: cognitoConfig.clientId,
+          logout_uri: redirectUri(),
+        });
+        redirectTo(`https://${cognitoConfig.hostedUiDomain}/logout?${params.toString()}`);
+      },
     }),
     [token],
   );

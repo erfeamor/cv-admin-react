@@ -7,9 +7,23 @@ describe('App', () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    sessionStorage.clear();
   });
 
-  it('renders the people list page at /', async () => {
+  it('shows the sign-in screen when unauthenticated', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Admin sign in' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('renders the people list page at / once authenticated', async () => {
+    sessionStorage.setItem('cv-admin.token', 'test-token');
+    sessionStorage.setItem('cv-admin.tokenExpiresAt', String(Date.now() + 60_000));
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -23,5 +37,8 @@ describe('App', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'People' })).toBeInTheDocument();
+    const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(url).toMatch(/\/api\/v1\/people$/);
+    expect(options.headers.Authorization).toBe('Bearer test-token');
   });
 });
