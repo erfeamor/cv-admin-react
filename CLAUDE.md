@@ -13,7 +13,7 @@ npm run dev                # :5173 (cp .env.example .env first)
 npm run build              # production bundle (deploy target: S3+CloudFront)
 ```
 
-CI: `.drone.yml` (install → lint + typecheck + test → build).
+CI: `.drone.yml` (install → lint → typecheck → test → build, sequential to fit the 1 GB Drone runner host; master pushes then deploy to S3 `/admin/` + CloudFront invalidation).
 
 ## Architecture & conventions
 

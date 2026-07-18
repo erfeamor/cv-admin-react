@@ -2,6 +2,12 @@ kind: pipeline
 type: docker
 name: ci
 
+trigger:
+  event: [push, pull_request]
+
+# Steps run sequentially on purpose: the Drone runner lives on a Free Tier
+# t3.micro (1 GB RAM + swap), and parallel node containers OOM it.
+
 steps:
   - name: install
     image: node:20
@@ -18,19 +24,38 @@ steps:
     image: node:20
     commands:
       - npm run typecheck
-    depends_on: [install]
+    depends_on: [lint]
 
   - name: test
     image: node:20
     commands:
       - npm test
-    depends_on: [install]
+    depends_on: [typecheck]
 
   - name: build
     image: node:20
     commands:
       - npm run build
-    depends_on: [lint, typecheck, test]
+    depends_on: [test]
 
-# Placeholder until cv-infra outputs the bucket/distribution IDs:
-# a deploy step syncs dist/ to S3 and invalidates CloudFront on main.
+  # PRs stop at build; the merge commit landing on master deploys. Bucket and
+  # distribution come from cv-infra outputs (frontend_bucket_name,
+  # frontend_cloudfront_distribution_id); this app owns the /admin/ prefix of
+  # the shared frontend bucket (vite base and the CloudFront spa-router agree).
+  # Secrets are the cv-project-drone-deploy IAM user's access key, set in the
+  # Drone UI for this repo.
+  - name: deploy
+    image: amazon/aws-cli
+    environment:
+      AWS_ACCESS_KEY_ID:
+        from_secret: aws_access_key_id
+      AWS_SECRET_ACCESS_KEY:
+        from_secret: aws_secret_access_key
+      AWS_DEFAULT_REGION: eu-west-3
+    commands:
+      - aws s3 sync dist/ s3://cv-project-frontend-dev/admin/ --delete
+      - aws cloudfront create-invalidation --distribution-id E2AV0INGJW1UO2 --paths "/admin/*"
+    depends_on: [build]
+    when:
+      branch: [master]
+      event: [push]
