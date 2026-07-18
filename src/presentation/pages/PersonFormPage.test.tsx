@@ -45,6 +45,20 @@ describe('PersonFormPage', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('loads the person into the form when the API returns numeric ids', async () => {
+    // Regression: the deployed Java service sends "id": 1 (number); the form
+    // sync guard compares against the string URL param and must still match.
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...jane, id: 1 }),
+    });
+
+    renderAt('/people/1');
+
+    await waitFor(() => expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe'));
+  });
+
   it('loads the existing person into the form when editing', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => jane });
 
