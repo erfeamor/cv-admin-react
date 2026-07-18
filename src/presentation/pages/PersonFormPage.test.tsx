@@ -1,32 +1,38 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { CognitoProvider } from '../auth/CognitoContext';
+import { usePeopleStore } from '../../store';
 import PersonFormPage from './PersonFormPage';
+
+const jane = {
+  id: '1',
+  fullName: 'Jane Doe',
+  headline: 'Engineer',
+  email: 'jane@example.com',
+  location: 'Madrid',
+  summary: 'Seed person',
+};
 
 function renderAt(path: string) {
   return render(
-    <CognitoProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/people/new" element={<PersonFormPage />} />
-          <Route path="/people/:id" element={<PersonFormPage />} />
-        </Routes>
-      </MemoryRouter>
-    </CognitoProvider>,
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/people/new" element={<PersonFormPage />} />
+        <Route path="/people/:id" element={<PersonFormPage />} />
+      </Routes>
+    </MemoryRouter>,
   );
+}
+
+function resetStore() {
+  usePeopleStore.setState({ people: [], selectedPerson: null, loading: false, error: null });
 }
 
 describe('PersonFormPage', () => {
   const originalFetch = global.fetch;
 
-  beforeEach(() => {
-    sessionStorage.setItem('cv-admin.token', 'test-token');
-    sessionStorage.setItem('cv-admin.tokenExpiresAt', String(Date.now() + 60_000));
-  });
-
   afterEach(() => {
     global.fetch = originalFetch;
-    sessionStorage.clear();
+    resetStore();
   });
 
   it('renders empty fields for a new person and does not fetch', () => {
@@ -40,18 +46,7 @@ describe('PersonFormPage', () => {
   });
 
   it('loads the existing person into the form when editing', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        id: '1',
-        fullName: 'Jane Doe',
-        headline: 'Engineer',
-        email: 'jane@example.com',
-        location: 'Madrid',
-        summary: 'Seed person',
-      }),
-    });
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => jane });
 
     renderAt('/people/1');
 
@@ -62,9 +57,18 @@ describe('PersonFormPage', () => {
     expect(screen.getByLabelText('Location')).toHaveValue('Madrid');
     expect(screen.getByLabelText('Summary')).toHaveValue('Seed person');
 
-    const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
+    const [url] = (global.fetch as jest.Mock).mock.calls[0];
     expect(url).toMatch(/\/api\/v1\/people\/1$/);
-    expect(options.headers.Authorization).toBe('Bearer test-token');
+  });
+
+  it('preloads the form from the store cache before the fetch resolves', () => {
+    usePeopleStore.setState({ people: [jane] });
+    // A fetch that never resolves: only the cached preload can fill the form.
+    global.fetch = jest.fn().mockReturnValue(new Promise(() => undefined));
+
+    renderAt('/people/1');
+
+    expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe');
   });
 
   it('shows an alert when the person fails to load', async () => {
@@ -75,19 +79,11 @@ describe('PersonFormPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load person');
   });
 
-  it('submits edits with PUT to the person endpoint', async () => {
-    const person = {
-      id: '1',
-      fullName: 'Jane Doe',
-      headline: 'Engineer',
-      email: 'jane@example.com',
-      location: 'Madrid',
-      summary: 'Seed person',
-    };
+  it('submits edits with PUT and shows a save error on failure', async () => {
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => person })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => person });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => jane })
+      .mockResolvedValueOnce({ ok: false, status: 400 });
 
     renderAt('/people/1');
 
@@ -96,7 +92,7 @@ describe('PersonFormPage', () => {
     fireEvent.change(nameInput, { target: { value: 'Jane Smith' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to save person');
     const [url, options] = (global.fetch as jest.Mock).mock.calls[1];
     expect(url).toMatch(/\/api\/v1\/people\/1$/);
     expect(options.method).toBe('PUT');

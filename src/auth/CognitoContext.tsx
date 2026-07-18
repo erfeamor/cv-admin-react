@@ -2,6 +2,7 @@ import { createContext, ReactNode, useContext, useEffect, useMemo, useState } fr
 import { redirectTo } from './browser';
 import { cognitoConfig, redirectUri } from './cognitoConfig';
 import { generateCodeChallenge, generateCodeVerifier } from './pkce';
+import { clearToken, getStoredToken, storeToken } from './tokenStorage';
 
 /**
  * Cognito Hosted UI auth via authorization code + PKCE (the app client has no
@@ -16,17 +17,9 @@ export interface AuthContextValue {
   logout: () => void;
 }
 
-const TOKEN_KEY = 'cv-admin.token';
-const EXPIRES_AT_KEY = 'cv-admin.tokenExpiresAt';
 const VERIFIER_KEY = 'cv-admin.pkceVerifier';
 
 const CognitoContext = createContext<AuthContextValue | null>(null);
-
-function storedToken(): string | null {
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  const expiresAt = Number(sessionStorage.getItem(EXPIRES_AT_KEY));
-  return token && expiresAt > Date.now() ? token : null;
-}
 
 async function startLogin(): Promise<void> {
   const verifier = generateCodeVerifier();
@@ -67,7 +60,7 @@ async function exchangeCode(
 }
 
 export function CognitoProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(storedToken);
+  const [token, setToken] = useState<string | null>(getStoredToken);
 
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('code');
@@ -82,8 +75,7 @@ export function CognitoProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem(VERIFIER_KEY);
     exchangeCode(code, verifier)
       .then(({ token: nextToken, expiresAt }) => {
-        sessionStorage.setItem(TOKEN_KEY, nextToken);
-        sessionStorage.setItem(EXPIRES_AT_KEY, String(expiresAt));
+        storeToken(nextToken, expiresAt);
         window.history.replaceState({}, '', window.location.pathname);
         setToken(nextToken);
       })
@@ -100,8 +92,7 @@ export function CognitoProvider({ children }: { children: ReactNode }) {
         void startLogin();
       },
       logout: () => {
-        sessionStorage.removeItem(TOKEN_KEY);
-        sessionStorage.removeItem(EXPIRES_AT_KEY);
+        clearToken();
         setToken(null);
         const params = new URLSearchParams({
           client_id: cognitoConfig.clientId,
