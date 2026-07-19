@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { usePeopleStore } from '../../store';
+import styles from './PeopleListPage.module.css';
 
 export default function PeopleListPage() {
   const { people, error, loadPeople, selectPerson } = usePeopleStore();
@@ -14,9 +15,9 @@ export default function PeopleListPage() {
   }
 
   return (
-    <section>
+    <section className={styles.page}>
       <h1>People</h1>
-      <ul>
+      <ul className={styles.list}>
         {people.map((person) => (
           <li key={person.id}>
             {/* Preload the selection so the edit form renders populated
@@ -27,7 +28,9 @@ export default function PeopleListPage() {
           </li>
         ))}
       </ul>
-      <Link to="/people/new">New person</Link>
+      <Link to="/people/new" className={styles.newLink}>
+        New person
+      </Link>
     </section>
   );
 }

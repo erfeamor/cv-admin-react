@@ -1,5 +1,6 @@
 import React from 'react';
 import { PersonInput } from '../../domain/person';
+import styles from './PersonForm.module.css';
 
 interface PersonFormProps {
   title: string;
@@ -25,29 +26,31 @@ export default function PersonForm({ title, value, onChange, onSubmit }: PersonF
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form className={styles.form} onSubmit={handleSubmit}>
       <h1>{title}</h1>
-      <label>
+      <label className={styles.field}>
         Full name
         <input value={value.fullName} onChange={handleChange('fullName')} required />
       </label>
-      <label>
+      <label className={styles.field}>
         Headline
         <input value={value.headline} onChange={handleChange('headline')} />
       </label>
-      <label>
+      <label className={styles.field}>
         Email
         <input type="email" value={value.email} onChange={handleChange('email')} required />
       </label>
-      <label>
+      <label className={styles.field}>
         Location
         <input value={value.location} onChange={handleChange('location')} />
       </label>
-      <label>
+      <label className={styles.field}>
         Summary
         <textarea value={value.summary} onChange={handleChange('summary')} />
       </label>
-      <button type="submit">Save</button>
+      <button type="submit" className={styles.submit}>
+        Save
+      </button>
     </form>
   );
 }

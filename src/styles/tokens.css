@@ -1,0 +1,61 @@
+/* Design tokens — the only place raw values live. Component modules and
+   global styles reference these custom properties, never literals. */
+
+:root {
+  color-scheme: light dark;
+
+  /* Color */
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-border: #d8dce2;
+  --color-text: #1c2128;
+  --color-text-muted: #57606a;
+  --color-accent: #3552c7;
+  --color-accent-hover: #2a41a0;
+  --color-accent-contrast: #ffffff;
+  --color-danger: #b3261e;
+  --color-danger-bg: #fdeeed;
+
+  /* Typography */
+  --font-sans:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-xl: 1.5rem;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 0.08);
+
+  /* Layout */
+  --content-max-width: 40rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #14171b;
+    --color-surface: #1d2229;
+    --color-border: #3a4149;
+    --color-text: #e6e9ec;
+    --color-text-muted: #9aa4af;
+    --color-accent: #7c93f0;
+    --color-accent-hover: #98aaf4;
+    --color-accent-contrast: #10142e;
+    --color-danger: #f2837c;
+    --color-danger-bg: #3a1f1d;
+    --shadow-card: 0 1px 3px rgb(0 0 0 / 0.4);
+  }
+}
