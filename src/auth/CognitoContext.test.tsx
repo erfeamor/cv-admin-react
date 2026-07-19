@@ -119,6 +119,54 @@ describe('CognitoProvider', () => {
     expect(screen.getByText('anonymous')).toBeInTheDocument();
   });
 
+  describe('with VITE_AUTH_ENABLED=false', () => {
+    beforeEach(() => {
+      process.env.VITE_AUTH_ENABLED = 'false';
+    });
+
+    afterEach(() => {
+      delete process.env.VITE_AUTH_ENABLED;
+    });
+
+    it('reports authenticated without a token', () => {
+      render(
+        <CognitoProvider>
+          <Probe />
+        </CognitoProvider>,
+      );
+
+      expect(screen.getByText('token:null')).toBeInTheDocument();
+    });
+
+    it('login and logout never touch the Hosted UI', () => {
+      render(
+        <CognitoProvider>
+          <Probe />
+        </CognitoProvider>,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'login' }));
+      fireEvent.click(screen.getByRole('button', { name: 'logout' }));
+
+      expect(redirectTo).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem('cv-admin.pkceVerifier')).toBeNull();
+    });
+
+    it('does not exchange a callback code', () => {
+      sessionStorage.setItem('cv-admin.pkceVerifier', 'test-verifier');
+      window.history.replaceState({}, '', '/admin/?code=auth-code-123');
+      global.fetch = jest.fn();
+
+      render(
+        <CognitoProvider>
+          <Probe />
+        </CognitoProvider>,
+      );
+
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
   it('logout clears the session and redirects to the Hosted UI logout', () => {
     sessionStorage.setItem('cv-admin.token', 'stored-token');
     sessionStorage.setItem('cv-admin.tokenExpiresAt', String(Date.now() + 60_000));

@@ -1,6 +1,6 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { redirectTo } from './browser';
-import { cognitoConfig, redirectUri } from './cognitoConfig';
+import { cognitoConfig, isAuthEnabled, redirectUri } from './cognitoConfig';
 import { generateCodeChallenge, generateCodeVerifier } from './pkce';
 import { clearToken, getStoredToken, storeToken } from './tokenStorage';
 
@@ -60,12 +60,13 @@ async function exchangeCode(
 }
 
 export function CognitoProvider({ children }: { children: ReactNode }) {
+  const authEnabled = isAuthEnabled();
   const [token, setToken] = useState<string | null>(getStoredToken);
 
   useEffect(() => {
     const code = new URLSearchParams(window.location.search).get('code');
     const verifier = sessionStorage.getItem(VERIFIER_KEY);
-    if (token || !code || !verifier) {
+    if (!authEnabled || token || !code || !verifier) {
       return;
     }
 
@@ -82,10 +83,20 @@ export function CognitoProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         // Failed exchange leaves the user on the sign-in screen to retry.
       });
-  }, [token]);
+  }, [authEnabled, token]);
 
-  const value = useMemo<AuthContextValue>(
-    () => ({
+  const value = useMemo<AuthContextValue>(() => {
+    if (!authEnabled) {
+      // Auth bypassed: requests go out with no Authorization header, which
+      // only works against a domain service running AUTH_ENABLED=false.
+      return {
+        token: null,
+        isAuthenticated: true,
+        login: () => undefined,
+        logout: () => undefined,
+      };
+    }
+    return {
       token,
       isAuthenticated: Boolean(token),
       login: () => {
@@ -100,9 +111,8 @@ export function CognitoProvider({ children }: { children: ReactNode }) {
         });
         redirectTo(`https://${cognitoConfig.hostedUiDomain}/logout?${params.toString()}`);
       },
-    }),
-    [token],
-  );
+    };
+  }, [authEnabled, token]);
 
   return <CognitoContext.Provider value={value}>{children}</CognitoContext.Provider>;
 }
