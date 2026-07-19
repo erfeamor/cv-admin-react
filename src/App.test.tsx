@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { usePeopleStore } from './store';
@@ -7,6 +7,10 @@ describe('App', () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
+    // Unmount before resetting the store: RTL's auto-cleanup runs after this
+    // hook, so without an explicit cleanup() the setState re-renders the
+    // still-mounted page outside act().
+    cleanup();
     global.fetch = originalFetch;
     sessionStorage.clear();
     usePeopleStore.setState({ people: [], selectedPerson: null, loading: false, error: null });

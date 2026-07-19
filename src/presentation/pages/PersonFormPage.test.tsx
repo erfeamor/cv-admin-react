@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { usePeopleStore } from '../../store';
 import PersonFormPage from './PersonFormPage';
@@ -31,6 +31,10 @@ describe('PersonFormPage', () => {
   const originalFetch = global.fetch;
 
   afterEach(() => {
+    // Unmount before resetting the store: RTL's auto-cleanup runs after this
+    // hook, so without an explicit cleanup() the setState re-renders the
+    // still-mounted page outside act().
+    cleanup();
     global.fetch = originalFetch;
     resetStore();
   });
