@@ -48,6 +48,14 @@ steps:
       - npm run build
     depends_on: [test]
 
+  # Compiles every story; catches stories drifting from component props.
+  # Storybook itself is not deployed anywhere — this is a build gate only.
+  - name: build-storybook
+    image: node:20
+    commands:
+      - npm run build-storybook
+    depends_on: [build]
+
   # PRs stop at build; the merge commit landing on master deploys. Bucket and
   # distribution come from cv-infra outputs (frontend_bucket_name,
   # frontend_cloudfront_distribution_id); this app owns the /admin/ prefix of
@@ -65,7 +73,7 @@ steps:
     commands:
       - aws s3 sync dist/ s3://cv-project-frontend-dev/admin/ --delete
       - aws cloudfront create-invalidation --distribution-id E2AV0INGJW1UO2 --paths "/admin/*"
-    depends_on: [build]
+    depends_on: [build-storybook]
     when:
       branch: [master]
       event: [push]
