@@ -48,6 +48,23 @@ steps:
       - npm run build
     depends_on: [test]
 
+  # Compiles every story; catches stories drifting from component props.
+  # Storybook itself is not deployed anywhere — this is a build gate only.
+  #
+  # NODE_OPTIONS: bundling both the manager and preview in one process peaks
+  # around 800-860 MB RSS locally, regardless of story count. On this 1 GB
+  # runner, V8 auto-detects the low ceiling and defaults old-space to ~467 MB,
+  # aborting well short of that — a self-imposed limit that doesn't account
+  # for the host's swap (see top-of-file note on the free-tier box). Raising
+  # the ceiling explicitly lets V8 grow into swap instead of hard-aborting.
+  - name: build-storybook
+    image: node:20
+    environment:
+      NODE_OPTIONS: --max-old-space-size=896
+    commands:
+      - npm run build-storybook
+    depends_on: [build]
+
   # PRs stop at build; the merge commit landing on master deploys. Bucket and
   # distribution come from cv-infra outputs (frontend_bucket_name,
   # frontend_cloudfront_distribution_id); this app owns the /admin/ prefix of
@@ -65,7 +82,7 @@ steps:
     commands:
       - aws s3 sync dist/ s3://cv-project-frontend-dev/admin/ --delete
       - aws cloudfront create-invalidation --distribution-id E2AV0INGJW1UO2 --paths "/admin/*"
-    depends_on: [build]
+    depends_on: [build-storybook]
     when:
       branch: [master]
       event: [push]

@@ -11,9 +11,13 @@ npm run typecheck          # tsc --noEmit (strict mode; separate gate from build
 npm run lint               # eslint (react + react-hooks + @typescript-eslint plugins)
 npm run dev                # :5173 (cp .env.example .env first)
 npm run build              # production bundle (deploy target: S3+CloudFront)
+npm run storybook          # component workbench on :6006
+npm run build-storybook    # static Storybook (CI gate only, not deployed)
 ```
 
-CI: `.drone.yml` (install → lint → typecheck → test → build, sequential to fit the 1 GB Drone runner host; master pushes then deploy to S3 `/admin/` + CloudFront invalidation).
+CI: `.drone.yml` (install → lint → typecheck → test → build → build-storybook, sequential to fit the 1 GB Drone runner host; master pushes then deploy to S3 `/admin/` + CloudFront invalidation).
+
+Storybook (`.storybook/`, framework `@storybook/react-vite`, addons docs + a11y): co-located `*.stories.tsx` per presentation component. Controlled components get a stateful harness in the story file (`PersonForm.stories.tsx` pattern); interaction tests are play functions using `storybook/test`. Jest remains the only CI test runner — stories are compile-checked by `build-storybook`, and play functions run in the Storybook UI.
 
 ## Architecture & conventions
 
