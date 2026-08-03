@@ -41,6 +41,19 @@ Jest compiles ESM→CJS where `import.meta` is illegal syntax. `babel-plugin-tra
 
 RTL with mocked `global.fetch` (restore in `afterEach` — see `App.test.tsx`). Wrap routed components in `MemoryRouter`. Query by role/label, not test-ids. Every component and page has a test file beside it; stores are tested with a fake repository through the port, never fetch. The wired store in `src/store.ts` is module-level state — page tests must reset it in `afterEach` (`usePeopleStore.setState({ people: [], selectedPerson: null, loading: false, error: null })`).
 
+## Code review guidance
+
+Priorities, ranked:
+
+1. **Layering violations.** `presentation/` importing directly from `infrastructure/`, or any adapter wired outside `src/store.ts` (the composition root) — the dependency rule `domain ← application ← composition → infrastructure` is the whole point of this structure.
+2. **RTL query style.** Tests using test-ids or querying inputs not wrapped by a `<label>` — this repo's forms and RTL queries depend on the `<label>` wrapping the input.
+3. **Stale module-level store in page tests.** A new page test that doesn't reset `usePeopleStore` (or its section-store equivalent) in `afterEach` will leak state into other tests.
+4. New `VITE_*` env var not added to `ImportMetaEnv` in `src/vite-env.d.ts`.
+
+Don't flag:
+- `import.meta.env` usage limited to `.env` values — this is the one `import.meta` feature Jest can handle via the babel transform; don't suggest broader `import.meta` (url/resolve) since it breaks tests.
+- The Cognito PKCE flow's sessionStorage-based verifier handling in `CognitoContext.tsx` — intentional, guards against StrictMode double-invoking the code exchange.
+
 ## Git workflow
 
 `master` is protected — feature branch (`feat/…`) → push → PR via `gh`. Definition of done: tests for new pages/flows, lint clean.
