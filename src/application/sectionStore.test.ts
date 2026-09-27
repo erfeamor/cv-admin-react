@@ -391,4 +391,26 @@ describe('sectionStore T-302: writes vs loads, notice lifetime', () => {
     expect(store.getState().items).toEqual([older]);
     expect(store.getState().loading).toBe(false);
   });
+
+  it('a remove that settles after switching A → B → A keeps A\'s reloaded rows, minus the deleted one', async () => {
+    const pendingRemove = deferred<void>();
+    const pendingReload = deferred<Experience[]>();
+    const repository = fakeRepository({ remove: jest.fn().mockReturnValue(pendingRemove.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const removing = store.getState().remove('2');
+    (repository.list as jest.Mock).mockResolvedValueOnce([]);
+    await store.getState().load('8');
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingReload.promise);
+    const loading = store.getState().load('7');
+    pendingRemove.resolve();
+    await removing;
+    pendingReload.resolve([newer, older]);
+    await loading;
+
+    expect(store.getState().items).toEqual([older]);
+    expect(store.getState().loading).toBe(false);
+  });
 });
+

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { errorStatus } from '../domain/errors';
 import { SectionRepository } from '../domain/ports';
-import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
+import { createPendingEffects, LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
 
 /**
  * Application layer for a person-scoped section (experiences, educations,
@@ -24,8 +24,8 @@ import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './
  * load settles `loading`; only the newest read (load or post-write re-read)
  * sets the rows, the load's `error` or clears `notice`; and a write that
  * settles after the page moved to another person leaves that list alone.
- * A remove (or 404 drop) does not re-read, so it supersedes any read issued
- * before it settled; the load then only clears `loading`.
+ * A remove (or 404 drop) does not re-read, so its effect is re-applied to
+ * any read issued before it settled (see `createPendingEffects`).
  * `notice` is cleared only by a successful read that lands (or a person
  * switch) — writes that do not re-read never clear it.
  */
@@ -67,7 +67,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       if (read !== latestRead || !isCurrent(personId)) {
         return;
       }
-      set(items ? { items, notice: null } : { notice: REFRESH_NOTICE });
+      set(items ? { items: pending.land(read, items), notice: null } : { notice: REFRESH_NOTICE });
     }
 
     /** The person for a write — refused before any load, and while one is in flight. */
@@ -79,14 +79,14 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       return personId;
     }
 
-    /**
-     * Drop a row without re-reading. Bumping `latestRead` discards any read
-     * issued before this settled — the server may have answered it before
-     * the delete, so landing it would bring the row back.
-     */
+    // A remove (or 404 drop) does not re-read: its effect is replayed onto
+    // any read issued before it settled, so a late read cannot bring the row back.
+    const pending = createPendingEffects<TEntity>();
+
     function dropRow(id: string) {
-      latestRead++;
-      set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+      const without = (items: TEntity[]) => items.filter((item) => item.id !== id);
+      pending.record(latestRead, without);
+      set((state) => ({ items: without(state.items) }));
     }
 
     function dropIfGone(err: unknown, personId: string, id: string) {
@@ -104,6 +104,9 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
 
       load: async (personId) => {
         const load = ++latestLoad;
+        if (!isCurrent(personId)) {
+          pending.clear();
+        }
         set(isCurrent(personId) ? { loading: true, error: null } : { personId, items: [], loading: true, error: null, notice: null });
         const { read, items, err } = await readList(personId);
         if (load !== latestLoad || !isCurrent(personId)) {
@@ -113,7 +116,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
           // A write's newer re-read owns the rows, the notice and any failure.
           set({ loading: false });
         } else if (items) {
-          set({ loading: false, items, notice: null });
+          set({ loading: false, items: pending.land(read, items), notice: null });
         } else {
           set({ loading: false, error: (err as Error).message });
         }

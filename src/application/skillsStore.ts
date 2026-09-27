@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { errorStatus } from '../domain/errors';
 import { PersonSkillRepository, SkillCatalogRepository } from '../domain/ports';
 import { PersonSkill, Proficiency, Skill, SkillInput } from '../domain/skill';
-import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
+import { createPendingEffects, LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
 
 /**
  * Application layer for skills: the global catalog plus one person's
@@ -54,19 +54,18 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
       }
     }
 
-    /**
-     * Assignment writes that do not re-read (unassign, 404 drop, in-place
-     * re-assign) supersede any assignments read issued before they settled —
-     * the server may have answered it before the write, so landing it would
-     * undo the write on screen.
-     */
-    function supersedeAssignmentsReads() {
-      latestAssignmentsRead++;
+    // Assignment writes that do not re-read (unassign, 404 drop, in-place
+    // re-assign) are replayed onto any assignments read issued before they
+    // settled, so a late read cannot undo them on screen.
+    const pending = createPendingEffects<PersonSkill>();
+
+    function applyToAssignments(apply: (assignments: PersonSkill[]) => PersonSkill[]) {
+      pending.record(latestAssignmentsRead, apply);
+      set((state) => ({ assignments: apply(state.assignments) }));
     }
 
     function drop(skillId: string) {
-      supersedeAssignmentsReads();
-      set((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== skillId) }));
+      applyToAssignments((assignments) => assignments.filter((entry) => entry.skillId !== skillId));
     }
 
     function refuseMidLoad() {
@@ -96,6 +95,9 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         const assignmentsRead = ++latestAssignmentsRead;
         const catalogRead = ++latestCatalogRead;
         failedLists = new Set(); // this load clears `error`
+        if (!isCurrent(personId)) {
+          pending.clear();
+        }
         set(
           isCurrent(personId)
             ? { loading: true, error: null }
@@ -123,7 +125,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         }
         if (assignmentsRead === latestAssignmentsRead) {
           if (assignments.status === 'fulfilled') {
-            Object.assign(next, { assignments: assignments.value, assignmentsNotice: null });
+            Object.assign(next, { assignments: pending.land(assignmentsRead, assignments.value), assignmentsNotice: null });
           } else {
             failures.push((assignments.reason as Error).message);
             failedLists.add('assignments');
@@ -158,18 +160,17 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         if (!isCurrent(personId)) {
           return assigned;
         }
-        const exists = get().assignments.some((entry) => entry.skillId === skillId);
-        set((state) => ({ assignments: upsertBy(state.assignments, assigned, 'skillId') }));
-        if (exists) {
+        if (get().assignments.some((entry) => entry.skillId === skillId)) {
           // PUT is an upsert: an existing assignment keeps its place, no re-read needed.
-          supersedeAssignmentsReads();
+          applyToAssignments((assignments) => upsertBy(assignments, assigned, 'skillId'));
           return assigned;
         }
+        set((state) => ({ assignments: upsertBy(state.assignments, assigned, 'skillId') }));
         const read = ++latestAssignmentsRead;
         try {
           const assignments = await personSkillRepository.list(personId);
           if (read === latestAssignmentsRead && isCurrent(personId)) {
-            set({ assignments, assignmentsNotice: null });
+            set({ assignments: pending.land(read, assignments), assignmentsNotice: null });
             readSucceeded('assignments');
           }
         } catch {

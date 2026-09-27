@@ -29,3 +29,27 @@ export class LoadInFlightError extends Error {
     this.name = 'LoadInFlightError';
   }
 }
+
+/**
+ * Writes that change a list without re-reading it (a delete, an in-place
+ * update) record their effect here, stamped with the read counter at the
+ * moment they settled. A read issued at or before that stamp may have been
+ * answered before the write committed, so when it lands the effect is
+ * re-applied to its rows. Effects older than a landed read are pruned.
+ */
+export function createPendingEffects<T>() {
+  let effects: { settledAt: number; apply: (items: T[]) => T[] }[] = [];
+  return {
+    record(settledAt: number, apply: (items: T[]) => T[]) {
+      effects.push({ settledAt, apply });
+    },
+    /** Rows of read `read` with every effect that settled after it went out. */
+    land(read: number, items: T[]): T[] {
+      effects = effects.filter((effect) => effect.settledAt >= read);
+      return effects.reduce((rows, effect) => effect.apply(rows), items);
+    },
+    clear() {
+      effects = [];
+    },
+  };
+}

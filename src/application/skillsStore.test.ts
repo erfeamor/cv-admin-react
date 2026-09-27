@@ -446,5 +446,25 @@ describe('skillsStore T-302: writes vs loads, per-list notices', () => {
 
     expect(store.getState().error).toBe('boom');
   });
+
+  it('an unassign that settles after switching A → B → A keeps A\'s reloaded list, minus the skill', async () => {
+    const pendingUnassign = deferred<void>();
+    const pendingReload = deferred<PersonSkill[]>();
+    const { personSkills, store } = await loaded();
+    (personSkills.unassign as jest.Mock).mockReturnValueOnce(pendingUnassign.promise);
+
+    const unassigning = store.getState().unassign('5');
+    (personSkills.list as jest.Mock).mockResolvedValueOnce([]);
+    await store.getState().load('8');
+    (personSkills.list as jest.Mock).mockReturnValueOnce(pendingReload.promise);
+    const loading = store.getState().load('7');
+    pendingUnassign.resolve();
+    await unassigning;
+    pendingReload.resolve([assignedZig, assignedGit]);
+    await loading;
+
+    expect(store.getState().assignments).toEqual([assignedGit]);
+    expect(store.getState().loading).toBe(false);
+  });
 });
 
