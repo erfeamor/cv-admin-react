@@ -1,5 +1,6 @@
 import React from 'react';
 import { PROFICIENCIES, Proficiency, Skill, SkillAssignmentDraft } from '../../domain/skill';
+import { PROFICIENCY_LABELS } from '../proficiencyLabels';
 import styles from './SectionForm.module.css';
 
 interface SkillAssignmentFormProps {
@@ -8,13 +9,6 @@ interface SkillAssignmentFormProps {
   onChange: (value: SkillAssignmentDraft) => void;
   onSubmit: () => void;
 }
-
-const PROFICIENCY_LABELS: Record<Proficiency, string> = {
-  BEGINNER: 'Beginner',
-  INTERMEDIATE: 'Intermediate',
-  ADVANCED: 'Advanced',
-  EXPERT: 'Expert',
-};
 
 /**
  * Catalog picker + proficiency select. Assigning an already-assigned skill
