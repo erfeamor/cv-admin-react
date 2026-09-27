@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { useSkillsStore } from '../../store';
 import { FakeResponse, mockFetch, recordedRequests } from '../../testing/mockFetch';
@@ -52,7 +52,7 @@ describe('SkillsPage', () => {
     cleanup();
     global.fetch = originalFetch;
     jest.restoreAllMocks();
-    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, notice: null });
+    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, catalogNotice: null, assignmentsNotice: null });
   });
 
   it('renders the assigned skills and the catalog picker in the order served', async () => {
@@ -174,6 +174,44 @@ describe('SkillsPage', () => {
       'A skill named "Java" already exists in the catalog — pick it from the list instead.',
     );
     expect(screen.getByLabelText('Skill name')).toHaveValue('Java');
+  });
+
+  it('disables both forms and the remove buttons while loading', async () => {
+    serve();
+
+    renderPage();
+
+    // The load starts on mount: nothing can be written until it settles.
+    const writeControls = () => [
+      screen.getByLabelText('Skill'),
+      screen.getByLabelText('Proficiency'),
+      screen.getByRole('button', { name: 'Assign' }),
+      screen.getByLabelText('Skill name'),
+      screen.getByLabelText('Category'),
+      screen.getByRole('button', { name: 'Add to catalog' }),
+    ];
+    writeControls().forEach((control) => expect(control).toBeDisabled());
+
+    await screen.findByRole('button', { name: 'Remove Zig' });
+    await waitFor(() => writeControls().forEach((control) => expect(control).toBeEnabled()));
+    expect(screen.getByRole('button', { name: 'Remove Zig' })).toBeEnabled();
+
+    act(() => useSkillsStore.setState({ loading: true }));
+    expect(screen.getByRole('button', { name: 'Remove Zig' })).toBeDisabled();
+    writeControls().forEach((control) => expect(control).toBeDisabled());
+  });
+
+  it('shows the catalog and assignments notices separately', async () => {
+    serve();
+    renderPage();
+    await screen.findByRole('button', { name: 'Remove Zig' });
+
+    act(() => useSkillsStore.setState({ catalogNotice: 'catalog stale', assignmentsNotice: 'assignments stale' }));
+
+    expect(screen.getAllByRole('status').map((status) => status.textContent)).toEqual([
+      'catalog stale',
+      'assignments stale',
+    ]);
   });
 
   it('shows an alert when loading fails', async () => {

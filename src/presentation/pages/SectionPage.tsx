@@ -47,7 +47,7 @@ export function formatPeriod(startDate: string | null, endDate: string | null): 
  * thin route pages (ExperiencesPage, …) bind it to a store hook, the domain
  * draft helpers and their form. Rows render in store order, which is server
  * order — never sorted here. Keyed by person so local form state resets when
- * `:id` changes.
+ * `:id` changes. The form and Delete buttons are disabled while the list loads.
  */
 export default function SectionPage<TEntity extends { id: string }, TInput, TDraft>(
   props: SectionPageProps<TEntity, TInput, TDraft>,
@@ -152,6 +152,7 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
                 type="button"
                 className={styles.rowButton}
                 aria-label={`Delete ${name(entity)}`}
+                disabled={loading}
                 onClick={() => void handleDelete(entity)}
               >
                 Delete
@@ -161,20 +162,23 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
         })}
       </ul>
       <ProblemsAlert problems={problems} />
-      <Form
-        title={editingId ? `Edit ${noun}` : `New ${noun}`}
-        value={draft}
-        onChange={setDraft}
-        onSubmit={() => void handleSubmit()}
-        onCancel={
-          editingId
-            ? () => {
-                resetForm();
-                setProblems([]);
-              }
-            : undefined
-        }
-      />
+      {/* Writes wait for the load: the store refuses them mid-load anyway. */}
+      <fieldset className={styles.writes} disabled={loading}>
+        <Form
+          title={editingId ? `Edit ${noun}` : `New ${noun}`}
+          value={draft}
+          onChange={setDraft}
+          onSubmit={() => void handleSubmit()}
+          onCancel={
+            editingId
+              ? () => {
+                  resetForm();
+                  setProblems([]);
+                }
+              : undefined
+          }
+        />
+      </fieldset>
     </section>
   );
 }

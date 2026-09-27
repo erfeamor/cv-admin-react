@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { errorStatus } from '../domain/errors';
 import { SectionRepository } from '../domain/ports';
-import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
+import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
 
 /**
  * Application layer for a person-scoped section (experiences, educations,
@@ -18,17 +18,21 @@ import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
  * visible at once and survives a failed re-read (which raises `notice`, not
  * the blocking `error`).
  *
- * Races: only the newest load settles `loading`/`error`, only the newest
- * read (load or post-write re-read) sets the rows, and a write that settles
- * after the page moved to another person leaves that person's list alone.
- * Any later successful write or read clears `notice`.
+ * Races: the pages disable writes while `loading`, and a write that arrives
+ * mid-load anyway is rejected with `LoadInFlightError` (never sent). A write
+ * started *before* a load can still re-read after it, so: only the newest
+ * load settles `loading`; only the newest read (load or post-write re-read)
+ * sets the rows, the load's `error` or clears `notice`; and a write that
+ * settles after the page moved to another person leaves that list alone.
+ * `notice` is cleared only by a successful read that lands (or a person
+ * switch) — writes that do not re-read never clear it.
  */
 export interface SectionState<TEntity extends { id: string }, TInput> {
   personId: string | null;
   items: TEntity[];
   loading: boolean;
   error: string | null;
-  /** Non-blocking: a write succeeded but the re-read failed. */
+  /** Non-blocking: a write succeeded but the re-read failed; cleared only by a later successful read. */
   notice: string | null;
   load: (personId: string) => Promise<void>;
   save: (input: TInput, id?: string) => Promise<TEntity>;
@@ -64,6 +68,15 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       set(items ? { items, notice: null } : { notice: REFRESH_NOTICE });
     }
 
+    /** The person for a write — refused before any load, and while one is in flight. */
+    function writablePersonId(): string {
+      const personId = requirePersonId(get().personId);
+      if (get().loading) {
+        throw new LoadInFlightError();
+      }
+      return personId;
+    }
+
     function dropIfGone(err: unknown, personId: string, id: string) {
       if (errorStatus(err) === 404 && isCurrent(personId)) {
         set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
@@ -79,21 +92,23 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
 
       load: async (personId) => {
         const load = ++latestLoad;
-        set({ personId, items: isCurrent(personId) ? get().items : [], loading: true, error: null, notice: null });
+        set(isCurrent(personId) ? { loading: true, error: null } : { personId, items: [], loading: true, error: null, notice: null });
         const { read, items, err } = await readList(personId);
         if (load !== latestLoad || !isCurrent(personId)) {
           return;
         }
-        const rowsAreLatest = read === latestRead;
-        if (items) {
-          set({ loading: false, ...(rowsAreLatest ? { items } : {}) });
+        if (read !== latestRead) {
+          // A write's newer re-read owns the rows, the notice and any failure.
+          set({ loading: false });
+        } else if (items) {
+          set({ loading: false, items, notice: null });
         } else {
           set({ loading: false, error: (err as Error).message });
         }
       },
 
       save: async (input, id) => {
-        const personId = requirePersonId(get().personId);
+        const personId = writablePersonId();
         let saved: TEntity;
         try {
           saved = id ? await repository.update(personId, id, input) : await repository.create(personId, input);
@@ -111,7 +126,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       },
 
       remove: async (id) => {
-        const personId = requirePersonId(get().personId);
+        const personId = writablePersonId();
         try {
           await repository.remove(personId, id);
         } catch (err) {
@@ -119,7 +134,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
           throw err;
         }
         if (isCurrent(personId)) {
-          set((state) => ({ items: state.items.filter((item) => item.id !== id), notice: null }));
+          set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
         }
       },
     };

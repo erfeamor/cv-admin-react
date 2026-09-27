@@ -1,5 +1,6 @@
 import { Experience, ExperienceInput } from '../domain/experience';
 import { ExperienceRepository } from '../domain/ports';
+import { LoadInFlightError } from './collections';
 import { createSectionStore } from './sectionStore';
 
 const row = (id: string, startDate: string): Experience => ({
@@ -251,37 +252,105 @@ describe('sectionStore races (review round 1, items 1, 7, 8)', () => {
   });
 });
 
-describe('sectionStore round 2: load vs write re-read, notice lifetime', () => {
-  it('a save re-read during an in-flight load settles loading and keeps the newer list', async () => {
-    let resolveLoad!: (rows: Experience[]) => void;
-    const created = { id: '3', ...input };
-    const repository = fakeRepository({
-      list: jest
-        .fn()
-        .mockReturnValueOnce(new Promise<Experience[]>((resolve) => (resolveLoad = resolve)))
-        .mockResolvedValueOnce([created, newer, older]),
+describe('sectionStore T-302: writes vs loads, notice lifetime', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
-    const store = createSectionStore(repository);
+    return { promise, resolve, reject };
+  }
 
-    const loading = store.getState().load('7');
-    await store.getState().save(input);
-    resolveLoad([newer, older]);
-    await loading;
-
-    expect(store.getState().loading).toBe(false);
-    expect(store.getState().items).toEqual([created, newer, older]);
-  });
-
-  it('a later successful remove clears the refresh notice', async () => {
+  async function withNotice() {
     const repository = fakeRepository();
     const store = createSectionStore(repository);
     await store.getState().load('7');
     (repository.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
     await store.getState().save(input);
     expect(store.getState().notice).not.toBeNull();
+    return { repository, store };
+  }
+
+  it('rejects save and remove during an in-flight load without calling the repository', async () => {
+    const pendingList = deferred<Experience[]>();
+    const repository = fakeRepository();
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingList.promise);
+    const loading = store.getState().load('7');
+
+    await expect(store.getState().save(input)).rejects.toBeInstanceOf(LoadInFlightError);
+    await expect(store.getState().save(input, '1')).rejects.toBeInstanceOf(LoadInFlightError);
+    await expect(store.getState().remove('1')).rejects.toBeInstanceOf(LoadInFlightError);
+
+    expect(repository.create).not.toHaveBeenCalled();
+    expect(repository.update).not.toHaveBeenCalled();
+    expect(repository.remove).not.toHaveBeenCalled();
+    pendingList.resolve([newer, older]);
+    await loading;
+    expect(store.getState().items).toEqual([newer, older]);
+  });
+
+  it('a remove of another row does not clear the refresh notice', async () => {
+    const { store } = await withNotice();
 
     await store.getState().remove('1');
 
+    expect(store.getState().notice).not.toBeNull();
+  });
+
+  it('a later save whose re-read succeeds clears the notice and takes the server order', async () => {
+    const created = { id: '3', ...input };
+    const { repository, store } = await withNotice();
+    (repository.list as jest.Mock).mockResolvedValueOnce([created, newer, older]);
+
+    await store.getState().save(input, '3');
+
     expect(store.getState().notice).toBeNull();
+    expect(store.getState().items).toEqual([created, newer, older]);
+  });
+
+  it('a load superseded by a write\'s newer re-read keeps that list and does not raise its failure', async () => {
+    const created = { id: '3', ...input };
+    const pendingCreate = deferred<Experience>();
+    const pendingLoad = deferred<Experience[]>();
+    const repository = fakeRepository({ create: jest.fn().mockReturnValue(pendingCreate.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    // The write starts before the load (forms are enabled), and its re-read goes out after the load's read.
+    const saving = store.getState().save(input);
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce([created, newer, older]);
+    const loading = store.getState().load('7');
+    pendingCreate.resolve(created);
+    await saving;
+    pendingLoad.reject(new Error('boom'));
+    await loading;
+
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().loading).toBe(false);
+    expect(store.getState().items).toEqual([created, newer, older]);
+  });
+
+  it('a load superseded by a write\'s newer re-read settles loading and keeps the newer list', async () => {
+    const created = { id: '3', ...input };
+    const pendingCreate = deferred<Experience>();
+    const pendingLoad = deferred<Experience[]>();
+    const repository = fakeRepository({ create: jest.fn().mockReturnValue(pendingCreate.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const saving = store.getState().save(input);
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingLoad.promise).mockResolvedValueOnce([created, newer, older]);
+    const loading = store.getState().load('7');
+    pendingCreate.resolve(created);
+    await saving;
+    pendingLoad.resolve([newer, older]);
+    await loading;
+
+    expect(store.getState().loading).toBe(false);
+    expect(store.getState().items).toEqual([created, newer, older]);
   });
 });

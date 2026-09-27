@@ -2,17 +2,19 @@ import { create } from 'zustand';
 import { errorStatus } from '../domain/errors';
 import { PersonSkillRepository, SkillCatalogRepository } from '../domain/ports';
 import { PersonSkill, Proficiency, Skill, SkillInput } from '../domain/skill';
-import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
+import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
 
 /**
  * Application layer for skills: the global catalog plus one person's
  * assignments. Same error split as the other stores (`load` records, writes
  * throw). Both lists stay in server order — after a write that can move a
  * row, the list is re-read rather than sorted here; a failed re-read raises
- * the non-blocking `notice`, which any later successful write or read clears.
- * Same race rules as sectionStore: only the newest load settles `loading`,
- * only the newest read of each list lands, and writes settling after a
- * person change are ignored.
+ * that list's own non-blocking notice (`catalogNotice` / `assignmentsNotice`),
+ * which only a later successful read of the same list clears.
+ * Same race rules as sectionStore: writes are refused while `loading`
+ * (`LoadInFlightError`), only the newest load settles `loading`, only the
+ * newest read of each list sets its rows (or the load's `error`), and writes
+ * settling after a person change are ignored.
  */
 export interface SkillsState {
   personId: string | null;
@@ -20,7 +22,10 @@ export interface SkillsState {
   assignments: PersonSkill[];
   loading: boolean;
   error: string | null;
-  notice: string | null;
+  /** Non-blocking: a catalog write succeeded but the catalog re-read failed. */
+  catalogNotice: string | null;
+  /** Non-blocking: an assignment write succeeded but the assignments re-read failed. */
+  assignmentsNotice: string | null;
   load: (personId: string) => Promise<void>;
   createSkill: (input: SkillInput) => Promise<Skill>;
   assign: (skillId: string, proficiency: Proficiency) => Promise<PersonSkill>;
@@ -29,9 +34,10 @@ export interface SkillsState {
 
 export function createSkillsStore(catalogRepository: SkillCatalogRepository, personSkillRepository: PersonSkillRepository) {
   return create<SkillsState>()((set, get) => {
-    // As in sectionStore: `latestLoad` decides who settles `loading`/`error`;
-    // `latestAssignmentsRead` / `latestCatalogRead` decide whose rows land, so
-    // a write's re-read never strands an in-flight load (or vice versa).
+    // As in sectionStore: `latestLoad` decides who settles `loading`;
+    // `latestAssignmentsRead` / `latestCatalogRead` decide whose rows (and
+    // whose failure) land, since a write started before a load can re-read
+    // after it.
     let latestLoad = 0;
     let latestAssignmentsRead = 0;
     let latestCatalogRead = 0;
@@ -42,45 +48,67 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
       set((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== skillId) }));
     }
 
+    function refuseMidLoad() {
+      if (get().loading) {
+        throw new LoadInFlightError();
+      }
+    }
+
+    /** The person for an assignment write — refused before any load, and while one is in flight. */
+    function writablePersonId(): string {
+      const personId = requirePersonId(get().personId);
+      refuseMidLoad();
+      return personId;
+    }
+
     return {
       personId: null,
       catalog: [],
       assignments: [],
       loading: false,
       error: null,
-      notice: null,
+      catalogNotice: null,
+      assignmentsNotice: null,
 
       load: async (personId) => {
         const load = ++latestLoad;
         const assignmentsRead = ++latestAssignmentsRead;
         const catalogRead = ++latestCatalogRead;
-        set({
-          personId,
-          assignments: isCurrent(personId) ? get().assignments : [],
-          loading: true,
-          error: null,
-          notice: null,
-        });
-        try {
-          const [catalog, assignments] = await Promise.all([
-            catalogRepository.list(),
-            personSkillRepository.list(personId),
-          ]);
-          if (load === latestLoad && isCurrent(personId)) {
-            set({
-              loading: false,
-              ...(catalogRead === latestCatalogRead ? { catalog } : {}),
-              ...(assignmentsRead === latestAssignmentsRead ? { assignments } : {}),
-            });
-          }
-        } catch (err) {
-          if (load === latestLoad && isCurrent(personId)) {
-            set({ error: (err as Error).message, loading: false });
+        set(
+          isCurrent(personId)
+            ? { loading: true, error: null }
+            : { personId, assignments: [], loading: true, error: null, assignmentsNotice: null },
+        );
+        const [catalog, assignments] = await Promise.allSettled([
+          catalogRepository.list(),
+          personSkillRepository.list(personId),
+        ]);
+        if (load !== latestLoad || !isCurrent(personId)) {
+          return;
+        }
+        // Each list lands only if no newer read of it went out meanwhile; a
+        // superseded read's failure is that newer read's business, not `error`.
+        const next: Partial<SkillsState> = { loading: false };
+        const failures: string[] = [];
+        if (catalogRead === latestCatalogRead) {
+          if (catalog.status === 'fulfilled') {
+            Object.assign(next, { catalog: catalog.value, catalogNotice: null });
+          } else {
+            failures.push((catalog.reason as Error).message);
           }
         }
+        if (assignmentsRead === latestAssignmentsRead) {
+          if (assignments.status === 'fulfilled') {
+            Object.assign(next, { assignments: assignments.value, assignmentsNotice: null });
+          } else {
+            failures.push((assignments.reason as Error).message);
+          }
+        }
+        set(failures.length > 0 ? { ...next, error: failures[0] } : next);
       },
 
       createSkill: async (input) => {
+        refuseMidLoad();
         const created = await catalogRepository.create(input);
         // Shown at once, and kept if the re-read in the server's name order fails.
         set((state) => ({ catalog: upsertBy(state.catalog, created, 'id') }));
@@ -88,18 +116,18 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         try {
           const catalog = await catalogRepository.list();
           if (read === latestCatalogRead) {
-            set({ catalog, notice: null });
+            set({ catalog, catalogNotice: null });
           }
         } catch {
           if (read === latestCatalogRead) {
-            set({ notice: REFRESH_NOTICE });
+            set({ catalogNotice: REFRESH_NOTICE });
           }
         }
         return created;
       },
 
       assign: async (skillId, proficiency) => {
-        const personId = requirePersonId(get().personId);
+        const personId = writablePersonId();
         const assigned = await personSkillRepository.assign(personId, skillId, proficiency);
         if (!isCurrent(personId)) {
           return assigned;
@@ -108,25 +136,24 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         set((state) => ({ assignments: upsertBy(state.assignments, assigned, 'skillId') }));
         if (exists) {
           // PUT is an upsert: an existing assignment keeps its place, no re-read needed.
-          set({ notice: null });
           return assigned;
         }
         const read = ++latestAssignmentsRead;
         try {
           const assignments = await personSkillRepository.list(personId);
           if (read === latestAssignmentsRead && isCurrent(personId)) {
-            set({ assignments, notice: null });
+            set({ assignments, assignmentsNotice: null });
           }
         } catch {
           if (read === latestAssignmentsRead && isCurrent(personId)) {
-            set({ notice: REFRESH_NOTICE });
+            set({ assignmentsNotice: REFRESH_NOTICE });
           }
         }
         return assigned;
       },
 
       unassign: async (skillId) => {
-        const personId = requirePersonId(get().personId);
+        const personId = writablePersonId();
         try {
           await personSkillRepository.unassign(personId, skillId);
         } catch (err) {
@@ -138,7 +165,6 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         }
         if (isCurrent(personId)) {
           drop(skillId);
-          set({ notice: null });
         }
       },
     };

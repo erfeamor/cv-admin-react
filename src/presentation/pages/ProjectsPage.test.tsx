@@ -55,6 +55,7 @@ describe('ProjectsPage', () => {
     });
 
     renderPage();
+    await screen.findByText('No project entries yet.'); // forms stay disabled until the load settles
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'new' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -128,6 +129,7 @@ describe('ProjectsPage', () => {
     const fetchMock = mockFetch((method, path) => (method === 'GET' && path === BASE ? { status: 200, body: [] } : undefined));
 
     renderPage();
+    await screen.findByText('No project entries yet.'); // forms stay disabled until the load settles
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'x' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -144,6 +146,7 @@ describe('ProjectsPage', () => {
     });
 
     renderPage();
+    await screen.findByText('No project entries yet.'); // forms stay disabled until the load settles
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'x'.repeat(200) } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 

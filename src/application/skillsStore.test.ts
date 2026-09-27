@@ -1,6 +1,7 @@
 import { PersonSkillRepository, SkillCatalogRepository } from '../domain/ports';
 import { PersonSkill, Proficiency, Skill } from '../domain/skill';
-import { createSkillsStore } from './skillsStore';
+import { LoadInFlightError } from './collections';
+import { createSkillsStore, SkillsStore } from './skillsStore';
 
 const zig: Skill = { id: '5', name: 'Zig', category: null };
 const java: Skill = { id: '2', name: 'Java', category: 'Language' };
@@ -185,7 +186,7 @@ describe('skillsStore races (review round 1, items 1, 7, 8)', () => {
     await store.getState().assign('2', 'ADVANCED');
 
     expect(store.getState().error).toBeNull();
-    expect(store.getState().notice).toMatch(/Saved, but the list could not be refreshed/);
+    expect(store.getState().assignmentsNotice).toMatch(/Saved, but the list could not be refreshed/);
     expect(store.getState().assignments.map((entry) => entry.skillId)).toEqual(['5', '1', '2']);
   });
 
@@ -198,61 +199,149 @@ describe('skillsStore races (review round 1, items 1, 7, 8)', () => {
     await store.getState().createSkill({ name: 'Rust', category: null });
 
     expect(store.getState().error).toBeNull();
-    expect(store.getState().notice).toMatch(/could not be refreshed/);
+    expect(store.getState().catalogNotice).toMatch(/could not be refreshed/);
     expect(store.getState().catalog.map((skill) => skill.id)).toEqual(['5', '2', '9']);
   });
 });
 
-describe('skillsStore round 2: load vs write re-read, notice lifetime', () => {
-  it('an assign re-read during an in-flight load does not strand loading or drop the fresh catalog', async () => {
-    let resolveLoadList!: (rows: PersonSkill[]) => void;
+describe('skillsStore T-302: writes vs loads, per-list notices', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function loaded() {
+    const fakeRepos = fakes();
+    const store = createSkillsStore(fakeRepos.catalog, fakeRepos.personSkills);
+    await store.getState().load('7');
+    return { ...fakeRepos, store };
+  }
+
+  async function raiseAssignmentsNotice(personSkills: PersonSkillRepository, store: SkillsStore) {
+    (personSkills.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
+    await store.getState().assign('2', 'ADVANCED'); // new assignment → re-read fails
+    expect(store.getState().assignmentsNotice).toMatch(/could not be refreshed/);
+  }
+
+  async function raiseCatalogNotice(catalog: SkillCatalogRepository, store: SkillsStore) {
+    (catalog.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
+    await store.getState().createSkill({ name: 'Rust', category: null });
+    expect(store.getState().catalogNotice).toMatch(/could not be refreshed/);
+  }
+
+  it('rejects createSkill, assign and unassign during an in-flight load without calling the repositories', async () => {
+    const pendingCatalog = deferred<Skill[]>();
+    const { catalog, personSkills, store } = await loaded();
+    (catalog.list as jest.Mock).mockReturnValueOnce(pendingCatalog.promise);
+    const loading = store.getState().load('7');
+
+    await expect(store.getState().createSkill({ name: 'Rust', category: null })).rejects.toBeInstanceOf(LoadInFlightError);
+    await expect(store.getState().assign('2', 'ADVANCED')).rejects.toBeInstanceOf(LoadInFlightError);
+    await expect(store.getState().unassign('5')).rejects.toBeInstanceOf(LoadInFlightError);
+
+    expect(catalog.create).not.toHaveBeenCalled();
+    expect(personSkills.assign).not.toHaveBeenCalled();
+    expect(personSkills.unassign).not.toHaveBeenCalled();
+    pendingCatalog.resolve([zig, java]);
+    await loading;
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('unassign and an in-place re-assign leave the notices set', async () => {
+    const { catalog, personSkills, store } = await loaded();
+    await raiseAssignmentsNotice(personSkills, store);
+    await raiseCatalogNotice(catalog, store);
+
+    await store.getState().unassign('1');
+    await store.getState().assign('5', 'EXPERT'); // in place, no re-read
+
+    expect(store.getState().assignmentsNotice).toMatch(/could not be refreshed/);
+    expect(store.getState().catalogNotice).toMatch(/could not be refreshed/);
+  });
+
+  it('a successful assignments re-read clears only the assignments notice', async () => {
+    const { catalog, personSkills, store } = await loaded();
+    await raiseCatalogNotice(catalog, store);
+    await raiseAssignmentsNotice(personSkills, store);
+    store.setState((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== '2') }));
+
+    await store.getState().assign('2', 'ADVANCED'); // new again → re-read succeeds
+
+    expect(store.getState().assignmentsNotice).toBeNull();
+    expect(store.getState().catalogNotice).toMatch(/could not be refreshed/);
+  });
+
+  it('a successful catalog re-read clears only the catalog notice', async () => {
+    const { catalog, personSkills, store } = await loaded();
+    await raiseAssignmentsNotice(personSkills, store);
+    await raiseCatalogNotice(catalog, store);
+
+    await store.getState().createSkill({ name: 'Go', category: null });
+
+    expect(store.getState().catalogNotice).toBeNull();
+    expect(store.getState().assignmentsNotice).toMatch(/could not be refreshed/);
+  });
+
+  it('a successful reload clears both notices', async () => {
+    const { catalog, personSkills, store } = await loaded();
+    await raiseAssignmentsNotice(personSkills, store);
+    await raiseCatalogNotice(catalog, store);
+
+    await store.getState().load('7');
+
+    expect(store.getState().catalogNotice).toBeNull();
+    expect(store.getState().assignmentsNotice).toBeNull();
+  });
+
+  it('a load superseded by an assign\'s newer re-read keeps that list and does not raise its failure', async () => {
+    const assignedJava: PersonSkill = { skillId: '2', name: 'Java', category: 'Language', proficiency: 'ADVANCED' };
+    const pendingAssign = deferred<PersonSkill>();
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const { personSkills, store } = await loaded();
+    (personSkills.assign as jest.Mock).mockReturnValueOnce(pendingAssign.promise);
+
+    // The write starts before the load (forms are enabled), and its re-read goes out after the load's read.
+    const assigning = store.getState().assign('2', 'ADVANCED');
+    (personSkills.list as jest.Mock)
+      .mockReturnValueOnce(pendingLoadList.promise)
+      .mockResolvedValueOnce([assignedJava, assignedZig]);
+    const loading = store.getState().load('7');
+    pendingAssign.resolve(assignedJava);
+    await assigning;
+    pendingLoadList.reject(new Error('boom'));
+    await loading;
+
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().loading).toBe(false);
+    expect(store.getState().assignments).toEqual([assignedJava, assignedZig]);
+  });
+
+  it('a load superseded by an assign\'s newer re-read settles loading and keeps both fresh lists', async () => {
     const rust: Skill = { id: '9', name: 'Rust', category: null };
     const assignedJava: PersonSkill = { skillId: '2', name: 'Java', category: 'Language', proficiency: 'ADVANCED' };
-    const { catalog, personSkills } = fakes(
-      { list: jest.fn().mockResolvedValue([zig, java, rust]) },
-      {
-        list: jest
-          .fn()
-          .mockReturnValueOnce(new Promise<PersonSkill[]>((resolve) => (resolveLoadList = resolve)))
-          .mockResolvedValueOnce([assignedJava, assignedZig]),
-      },
-    );
-    const store = createSkillsStore(catalog, personSkills);
+    const pendingAssign = deferred<PersonSkill>();
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const { catalog, personSkills, store } = await loaded();
+    (personSkills.assign as jest.Mock).mockReturnValueOnce(pendingAssign.promise);
+    (catalog.list as jest.Mock).mockResolvedValue([zig, java, rust]);
 
+    const assigning = store.getState().assign('2', 'ADVANCED');
+    (personSkills.list as jest.Mock)
+      .mockReturnValueOnce(pendingLoadList.promise)
+      .mockResolvedValueOnce([assignedJava, assignedZig]);
     const loading = store.getState().load('7');
-    await store.getState().assign('2', 'ADVANCED');
-    resolveLoadList([assignedZig]);
+    pendingAssign.resolve(assignedJava);
+    await assigning;
+    pendingLoadList.resolve([assignedZig]);
     await loading;
 
     expect(store.getState().loading).toBe(false);
     expect(store.getState().catalog).toEqual([zig, java, rust]);
-    // The write's re-read is newer than the load's read: it keeps the list.
     expect(store.getState().assignments).toEqual([assignedJava, assignedZig]);
-  });
-
-  it('any later successful write or re-read clears the refresh notice', async () => {
-    const { catalog, personSkills } = fakes();
-    const store = createSkillsStore(catalog, personSkills);
-    await store.getState().load('7');
-
-    const raiseNotice = async () => {
-      // Make '2' a new assignment again so the assign triggers a (failing) re-read.
-      store.setState((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== '2') }));
-      (personSkills.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
-      await store.getState().assign('2', 'ADVANCED');
-      expect(store.getState().notice).not.toBeNull();
-    };
-
-    await raiseNotice();
-    await store.getState().unassign('2');
-    expect(store.getState().notice).toBeNull();
-
-    await raiseNotice();
-    await store.getState().createSkill({ name: 'Rust', category: null });
-    expect(store.getState().notice).toBeNull();
-
-    await raiseNotice();
-    await store.getState().assign('5', 'EXPERT'); // in place, no re-read
-    expect(store.getState().notice).toBeNull();
   });
 });

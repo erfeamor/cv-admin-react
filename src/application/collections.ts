@@ -17,3 +17,15 @@ export function requirePersonId(personId: string | null): string {
 
 /** Shown when a write succeeded but the follow-up re-read of the list failed. */
 export const REFRESH_NOTICE = 'Saved, but the list could not be refreshed — reload the page to see the server order.';
+
+/**
+ * A write attempted while the list is still loading. The pages disable their
+ * forms and write buttons during a load, so this surfaces a UI bug rather than
+ * racing the load: the write is never sent.
+ */
+export class LoadInFlightError extends Error {
+  constructor() {
+    super('The list is still loading — try again once it has loaded.');
+    this.name = 'LoadInFlightError';
+  }
+}
