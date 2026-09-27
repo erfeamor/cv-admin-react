@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { Person, PersonInput } from '../domain/person';
 import { PersonRepository } from '../domain/ports';
+import { upsertBy } from './collections';
 
 /**
  * Application layer for the people resource. The store only speaks to the
  * PersonRepository port — inject a fake in tests, the HTTP adapter in the
- * composition root (src/store.ts). Future section stores (experiences,
- * educations, …) follow this same factory shape.
+ * composition root (src/store.ts). The person-scoped sections do not reuse
+ * this shape: they go through createSectionStore (sectionStore.ts) over the
+ * SectionRepository port, and skills through createSkillsStore.
  *
  * Error handling split: read paths (loadPeople/selectPerson) record failures
  * in `error` for the page to render; write paths (savePerson/removePerson)
@@ -22,13 +24,6 @@ export interface PeopleState {
   clearSelection: () => void;
   savePerson: (input: PersonInput, id?: string) => Promise<Person>;
   removePerson: (id: string) => Promise<void>;
-}
-
-function upsert(people: Person[], person: Person): Person[] {
-  const exists = people.some((candidate) => candidate.id === person.id);
-  return exists
-    ? people.map((candidate) => (candidate.id === person.id ? person : candidate))
-    : [...people, person];
 }
 
 export function createPeopleStore(repository: PersonRepository) {
@@ -63,7 +58,7 @@ export function createPeopleStore(repository: PersonRepository) {
 
     savePerson: async (input, id) => {
       const saved = id ? await repository.update(id, input) : await repository.create(input);
-      set({ people: upsert(get().people, saved), selectedPerson: saved });
+      set({ people: upsertBy(get().people, saved, 'id'), selectedPerson: saved });
       return saved;
     },
 

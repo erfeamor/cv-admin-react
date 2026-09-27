@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { emptyPersonInput, toPersonInput } from '../../domain/person';
 import { usePeopleStore } from '../../store';
 import PersonForm from '../components/PersonForm';
@@ -50,6 +50,7 @@ export default function PersonFormPage() {
         onChange={setForm}
         onSubmit={() => void handleSubmit()}
       />
+      {id && <Link to={`/people/${id}/sections`}>CV sections</Link>}
     </>
   );
 }
