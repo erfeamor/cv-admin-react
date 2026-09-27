@@ -171,3 +171,82 @@ describe('sectionStore', () => {
     expect(repository.create).not.toHaveBeenCalled();
   });
 });
+
+describe('sectionStore races (review round 1, items 1, 7, 8)', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it('a create that resolves after navigating to another person does not touch that person\'s list', async () => {
+    const pendingCreate = deferred<Experience>();
+    const repository = fakeRepository({ create: jest.fn().mockReturnValue(pendingCreate.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const saving = store.getState().save(input);
+    (repository.list as jest.Mock).mockResolvedValue([older]);
+    await store.getState().load('8');
+    pendingCreate.resolve({ id: '3', ...input });
+    await saving;
+
+    expect(store.getState().personId).toBe('8');
+    expect(store.getState().items).toEqual([older]);
+    expect(repository.list).toHaveBeenLastCalledWith('8');
+  });
+
+  it('a remove/404 that settles after navigating away leaves the new person\'s list alone', async () => {
+    const pendingRemove = deferred<void>();
+    const repository = fakeRepository({ remove: jest.fn().mockReturnValue(pendingRemove.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const removing = store.getState().remove('2');
+    (repository.list as jest.Mock).mockResolvedValue([newer]);
+    await store.getState().load('8');
+    pendingRemove.reject(notFound());
+    await expect(removing).rejects.toMatchObject({ status: 404 });
+
+    expect(store.getState().items).toEqual([newer]);
+  });
+
+  it('a stale list response for the same person is dropped — the latest request wins', async () => {
+    const first = deferred<Experience[]>();
+    const second = deferred<Experience[]>();
+    const repository = fakeRepository({
+      list: jest.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise),
+    });
+    const store = createSectionStore(repository);
+
+    const a = store.getState().load('7');
+    const b = store.getState().load('7');
+    second.resolve([newer, older]);
+    await b;
+    first.resolve([older]);
+    await a;
+
+    expect(store.getState().items).toEqual([newer, older]);
+  });
+
+  it('a failed re-read after a successful write keeps the list and raises a notice, not the load error', async () => {
+    const repository = fakeRepository();
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+    (repository.list as jest.Mock).mockRejectedValue(new Error('flaky'));
+
+    await store.getState().save(input);
+
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().notice).toMatch(/Saved, but the list could not be refreshed/);
+    expect(store.getState().items).toEqual([newer, older, { id: '3', ...input }]);
+
+    (repository.list as jest.Mock).mockResolvedValue([newer, older]);
+    await store.getState().load('7');
+    expect(store.getState().notice).toBeNull();
+  });
+});

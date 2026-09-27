@@ -27,3 +27,16 @@ describe('draft helpers', () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe('endDateFromDraft ordering (review round 1, item 6)', () => {
+  it('rejects an end date earlier than the start date', () => {
+    expect(endDateFromDraft({ startDate: '2022-06-01', endDate: '2022-05-31', current: false })).toEqual({
+      ok: false,
+      error: 'End date cannot be before the start date.',
+    });
+  });
+
+  it('accepts an end date equal to the start date', () => {
+    expect(endDateFromDraft({ startDate: '2022-06-01', endDate: '2022-06-01', current: false }).ok).toBe(true);
+  });
+});

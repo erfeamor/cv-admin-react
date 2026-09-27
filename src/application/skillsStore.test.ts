@@ -135,3 +135,70 @@ describe('skillsStore', () => {
     expect(store.getState().assignments).toEqual([assignedGit]);
   });
 });
+
+describe('skillsStore races (review round 1, items 1, 7, 8)', () => {
+  it('an assign that resolves after navigating to another person does not touch that person\'s list', async () => {
+    let resolveAssign!: (entry: PersonSkill) => void;
+    const { catalog, personSkills } = fakes(
+      {},
+      { assign: jest.fn().mockReturnValue(new Promise<PersonSkill>((resolve) => (resolveAssign = resolve))) },
+    );
+    const store = createSkillsStore(catalog, personSkills);
+    await store.getState().load('7');
+
+    const assigning = store.getState().assign('5', 'EXPERT');
+    (personSkills.list as jest.Mock).mockResolvedValue([assignedGit]);
+    await store.getState().load('8');
+    resolveAssign({ ...assignedZig, proficiency: 'EXPERT' });
+    await assigning;
+
+    expect(store.getState().assignments).toEqual([assignedGit]);
+  });
+
+  it('a stale load response is dropped — the latest request wins', async () => {
+    let resolveFirst!: (rows: PersonSkill[]) => void;
+    const { catalog, personSkills } = fakes(
+      {},
+      {
+        list: jest
+          .fn()
+          .mockReturnValueOnce(new Promise<PersonSkill[]>((resolve) => (resolveFirst = resolve)))
+          .mockResolvedValueOnce([assignedGit]),
+      },
+    );
+    const store = createSkillsStore(catalog, personSkills);
+
+    const a = store.getState().load('7');
+    await store.getState().load('7');
+    resolveFirst([assignedZig]);
+    await a;
+
+    expect(store.getState().assignments).toEqual([assignedGit]);
+  });
+
+  it('a failed re-read after a successful assign keeps the list and raises a notice, not the load error', async () => {
+    const { catalog, personSkills } = fakes();
+    const store = createSkillsStore(catalog, personSkills);
+    await store.getState().load('7');
+    (personSkills.list as jest.Mock).mockRejectedValue(new Error('flaky'));
+
+    await store.getState().assign('2', 'ADVANCED');
+
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().notice).toMatch(/Saved, but the list could not be refreshed/);
+    expect(store.getState().assignments.map((entry) => entry.skillId)).toEqual(['5', '1', '2']);
+  });
+
+  it('a failed catalog re-read after creating a skill raises a notice, not the load error', async () => {
+    const { catalog, personSkills } = fakes();
+    const store = createSkillsStore(catalog, personSkills);
+    await store.getState().load('7');
+    (catalog.list as jest.Mock).mockRejectedValue(new Error('flaky'));
+
+    await store.getState().createSkill({ name: 'Rust', category: null });
+
+    expect(store.getState().error).toBeNull();
+    expect(store.getState().notice).toMatch(/could not be refreshed/);
+    expect(store.getState().catalog.map((skill) => skill.id)).toEqual(['5', '2', '9']);
+  });
+});

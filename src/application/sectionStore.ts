@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { errorStatus } from '../domain/errors';
 import { SectionRepository } from '../domain/ports';
+import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
 
 /**
  * Application layer for a person-scoped section (experiences, educations,
@@ -13,51 +14,50 @@ import { SectionRepository } from '../domain/ports';
  * before the error is rethrown.
  *
  * Order is the server's (contract § Ordering): after a write the list is
- * re-read rather than sorted here.
+ * re-read rather than sorted here. The saved row is upserted first so it is
+ * visible at once and survives a failed re-read (which raises `notice`, not
+ * the blocking `error`).
+ *
+ * Races: every list read takes a sequence number and only the latest may
+ * land; a write that settles after the page moved to another person leaves
+ * that person's list alone.
  */
 export interface SectionState<TEntity extends { id: string }, TInput> {
   personId: string | null;
   items: TEntity[];
   loading: boolean;
   error: string | null;
+  /** Non-blocking: a write succeeded but the re-read failed. */
+  notice: string | null;
   load: (personId: string) => Promise<void>;
   save: (input: TInput, id?: string) => Promise<TEntity>;
   remove: (id: string) => Promise<void>;
-}
-
-function upsert<TEntity extends { id: string }>(items: TEntity[], item: TEntity): TEntity[] {
-  return items.some((candidate) => candidate.id === item.id)
-    ? items.map((candidate) => (candidate.id === item.id ? item : candidate))
-    : [...items, item];
 }
 
 export function createSectionStore<TEntity extends { id: string }, TInput>(
   repository: SectionRepository<TEntity, TInput>,
 ) {
   return create<SectionState<TEntity, TInput>>()((set, get) => {
-    function requirePerson(): string {
-      const { personId } = get();
-      if (personId === null) {
-        throw new Error('No person loaded');
-      }
-      return personId;
-    }
+    let latestRead = 0;
 
-    async function refresh(personId: string) {
+    const isCurrent = (personId: string) => get().personId === personId;
+
+    async function refresh(personId: string, afterWrite: boolean) {
+      const read = ++latestRead;
       try {
         const items = await repository.list(personId);
-        if (get().personId === personId) {
-          set({ items, loading: false });
+        if (read === latestRead && isCurrent(personId)) {
+          set({ items, loading: false, notice: null });
         }
       } catch (err) {
-        if (get().personId === personId) {
-          set({ error: (err as Error).message, loading: false });
+        if (read === latestRead && isCurrent(personId)) {
+          set(afterWrite ? { notice: REFRESH_NOTICE, loading: false } : { error: (err as Error).message, loading: false });
         }
       }
     }
 
-    function dropIfGone(err: unknown, id: string) {
-      if (errorStatus(err) === 404) {
+    function dropIfGone(err: unknown, personId: string, id: string) {
+      if (errorStatus(err) === 404 && isCurrent(personId)) {
         set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
       }
     }
@@ -67,39 +67,42 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       items: [],
       loading: false,
       error: null,
+      notice: null,
 
       load: async (personId) => {
-        const samePerson = get().personId === personId;
-        set({ personId, items: samePerson ? get().items : [], loading: true, error: null });
-        await refresh(personId);
+        set({ personId, items: isCurrent(personId) ? get().items : [], loading: true, error: null, notice: null });
+        await refresh(personId, false);
       },
 
       save: async (input, id) => {
-        const personId = requirePerson();
+        const personId = requirePersonId(get().personId);
         let saved: TEntity;
         try {
           saved = id ? await repository.update(personId, id, input) : await repository.create(personId, input);
         } catch (err) {
           if (id) {
-            dropIfGone(err, id);
+            dropIfGone(err, personId, id);
           }
           throw err;
         }
-        // Show the saved row immediately, then take the server's order.
-        set((state) => ({ items: upsert(state.items, saved), error: null }));
-        await refresh(personId);
+        if (isCurrent(personId)) {
+          set((state) => ({ items: upsertBy(state.items, saved, 'id'), error: null }));
+          await refresh(personId, true);
+        }
         return saved;
       },
 
       remove: async (id) => {
-        const personId = requirePerson();
+        const personId = requirePersonId(get().personId);
         try {
           await repository.remove(personId, id);
         } catch (err) {
-          dropIfGone(err, id);
+          dropIfGone(err, personId, id);
           throw err;
         }
-        set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+        if (isCurrent(personId)) {
+          set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+        }
       },
     };
   });

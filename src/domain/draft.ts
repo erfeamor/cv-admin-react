@@ -13,6 +13,7 @@ export interface PeriodDraft {
 }
 
 export const END_DATE_REQUIRED = 'End date is required unless "Current" is checked.';
+export const END_BEFORE_START = 'End date cannot be before the start date.';
 
 export function blankToNull(value: string): string | null {
   return value.trim() === '' ? null : value;
@@ -34,7 +35,16 @@ export function endDateFromDraft(
     return { ok: true, endDate: null };
   }
   const endDate = blankToNull(draft.endDate);
-  return endDate === null ? { ok: false, error: END_DATE_REQUIRED } : { ok: true, endDate };
+  if (endDate === null) {
+    return { ok: false, error: END_DATE_REQUIRED };
+  }
+  // ISO YYYY-MM-DD compares correctly as a string. The domain service has no
+  // cross-field check, so this is the only guard.
+  const startDate = blankToNull(draft.startDate);
+  if (startDate !== null && endDate < startDate) {
+    return { ok: false, error: END_BEFORE_START };
+  }
+  return { ok: true, endDate };
 }
 
 export function requiredError(label: string, value: string): string[] {
