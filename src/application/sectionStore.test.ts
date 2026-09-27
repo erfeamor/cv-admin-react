@@ -353,4 +353,42 @@ describe('sectionStore T-302: writes vs loads, notice lifetime', () => {
     expect(store.getState().loading).toBe(false);
     expect(store.getState().items).toEqual([created, newer, older]);
   });
+
+  it('a remove that settles after a load\'s read went out keeps the row gone and settles loading', async () => {
+    const pendingRemove = deferred<void>();
+    const pendingLoad = deferred<Experience[]>();
+    const repository = fakeRepository({ remove: jest.fn().mockReturnValue(pendingRemove.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const removing = store.getState().remove('2');
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingLoad.promise);
+    const loading = store.getState().load('7'); // remount: its read is answered before the delete commits
+    pendingRemove.resolve();
+    await removing;
+    pendingLoad.resolve([newer, older]);
+    await loading;
+
+    expect(store.getState().items).toEqual([older]);
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('an update answered 404 after a load\'s read went out keeps the stale row dropped', async () => {
+    const pendingUpdate = deferred<Experience>();
+    const pendingLoad = deferred<Experience[]>();
+    const repository = fakeRepository({ update: jest.fn().mockReturnValue(pendingUpdate.promise) });
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+
+    const saving = store.getState().save(input, '2');
+    (repository.list as jest.Mock).mockReturnValueOnce(pendingLoad.promise);
+    const loading = store.getState().load('7');
+    pendingUpdate.reject(notFound());
+    await expect(saving).rejects.toMatchObject({ status: 404 });
+    pendingLoad.resolve([newer, older]);
+    await loading;
+
+    expect(store.getState().items).toEqual([older]);
+    expect(store.getState().loading).toBe(false);
+  });
 });

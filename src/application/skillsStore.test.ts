@@ -344,4 +344,107 @@ describe('skillsStore T-302: writes vs loads, per-list notices', () => {
     expect(store.getState().catalog).toEqual([zig, java, rust]);
     expect(store.getState().assignments).toEqual([assignedJava, assignedZig]);
   });
+
+  it('an unassign that settles after a load\'s read went out keeps the skill gone and settles loading', async () => {
+    const pendingUnassign = deferred<void>();
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const { personSkills, store } = await loaded();
+    (personSkills.unassign as jest.Mock).mockReturnValueOnce(pendingUnassign.promise);
+
+    const unassigning = store.getState().unassign('5');
+    (personSkills.list as jest.Mock).mockReturnValueOnce(pendingLoadList.promise);
+    const loading = store.getState().load('7');
+    pendingUnassign.resolve();
+    await unassigning;
+    pendingLoadList.resolve([assignedZig, assignedGit]);
+    await loading;
+
+    expect(store.getState().assignments).toEqual([assignedGit]);
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('an unassign answered 404 after a load\'s read went out keeps the stale entry dropped', async () => {
+    const pendingUnassign = deferred<void>();
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const { personSkills, store } = await loaded();
+    (personSkills.unassign as jest.Mock).mockReturnValueOnce(pendingUnassign.promise);
+
+    const unassigning = store.getState().unassign('5');
+    (personSkills.list as jest.Mock).mockReturnValueOnce(pendingLoadList.promise);
+    const loading = store.getState().load('7');
+    pendingUnassign.reject(notFound());
+    await expect(unassigning).rejects.toMatchObject({ status: 404 });
+    pendingLoadList.resolve([assignedZig, assignedGit]);
+    await loading;
+
+    expect(store.getState().assignments).toEqual([assignedGit]);
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('an in-place re-assign that settles after a load\'s read went out keeps the new proficiency', async () => {
+    const pendingAssign = deferred<PersonSkill>();
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const { personSkills, store } = await loaded();
+    (personSkills.assign as jest.Mock).mockReturnValueOnce(pendingAssign.promise);
+
+    const assigning = store.getState().assign('5', 'EXPERT');
+    (personSkills.list as jest.Mock).mockReturnValueOnce(pendingLoadList.promise);
+    const loading = store.getState().load('7');
+    pendingAssign.resolve({ ...assignedZig, proficiency: 'EXPERT' });
+    await assigning;
+    pendingLoadList.resolve([assignedZig, assignedGit]);
+    await loading;
+
+    expect(store.getState().assignments).toEqual([{ ...assignedZig, proficiency: 'EXPERT' }, assignedGit]);
+    expect(store.getState().loading).toBe(false);
+  });
+
+  it('a successful assignments re-read clears a load error caused by the assignments', async () => {
+    const pendingLoadList = deferred<PersonSkill[]>();
+    const pendingAssign = deferred<PersonSkill>();
+    const { personSkills, store } = await loaded();
+    (personSkills.assign as jest.Mock).mockReturnValueOnce(pendingAssign.promise);
+
+    // The assign starts before the load; the load's assignments read fails, then the assign re-reads fine.
+    const assigning = store.getState().assign('2', 'ADVANCED');
+    (personSkills.list as jest.Mock).mockReturnValueOnce(pendingLoadList.promise);
+    const loading = store.getState().load('7');
+    pendingLoadList.reject(new Error('boom'));
+    await loading;
+    expect(store.getState().error).toBe('boom');
+    pendingAssign.resolve({ skillId: '2', name: 'Java', category: 'Language', proficiency: 'ADVANCED' });
+    await assigning;
+
+    expect(store.getState().error).toBeNull();
+  });
+
+  it('a successful catalog re-read clears a load error caused by the catalog', async () => {
+    const pendingCreate = deferred<Skill>();
+    const { catalog, store } = await loaded();
+    (catalog.create as jest.Mock).mockReturnValueOnce(pendingCreate.promise);
+
+    const creating = store.getState().createSkill({ name: 'Rust', category: null });
+    (catalog.list as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+    await store.getState().load('7');
+    expect(store.getState().error).toBe('boom');
+    pendingCreate.resolve({ id: '9', name: 'Rust', category: null });
+    await creating;
+
+    expect(store.getState().error).toBeNull();
+  });
+
+  it('a successful re-read of the other list keeps the load error', async () => {
+    const pendingCreate = deferred<Skill>();
+    const { catalog, personSkills, store } = await loaded();
+    (catalog.create as jest.Mock).mockReturnValueOnce(pendingCreate.promise);
+
+    const creating = store.getState().createSkill({ name: 'Rust', category: null });
+    (personSkills.list as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+    await store.getState().load('7');
+    pendingCreate.resolve({ id: '9', name: 'Rust', category: null });
+    await creating;
+
+    expect(store.getState().error).toBe('boom');
+  });
 });
+

@@ -44,7 +44,28 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
 
     const isCurrent = (personId: string) => get().personId === personId;
 
+    // Lists whose read failed in the latest load; `error` clears once a later
+    // successful read has covered every one of them.
+    let failedLists = new Set<'catalog' | 'assignments'>();
+
+    function readSucceeded(list: 'catalog' | 'assignments') {
+      if (failedLists.delete(list) && failedLists.size === 0) {
+        set({ error: null });
+      }
+    }
+
+    /**
+     * Assignment writes that do not re-read (unassign, 404 drop, in-place
+     * re-assign) supersede any assignments read issued before they settled —
+     * the server may have answered it before the write, so landing it would
+     * undo the write on screen.
+     */
+    function supersedeAssignmentsReads() {
+      latestAssignmentsRead++;
+    }
+
     function drop(skillId: string) {
+      supersedeAssignmentsReads();
       set((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== skillId) }));
     }
 
@@ -74,6 +95,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         const load = ++latestLoad;
         const assignmentsRead = ++latestAssignmentsRead;
         const catalogRead = ++latestCatalogRead;
+        failedLists = new Set(); // this load clears `error`
         set(
           isCurrent(personId)
             ? { loading: true, error: null }
@@ -90,11 +112,13 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         // superseded read's failure is that newer read's business, not `error`.
         const next: Partial<SkillsState> = { loading: false };
         const failures: string[] = [];
+        failedLists = new Set();
         if (catalogRead === latestCatalogRead) {
           if (catalog.status === 'fulfilled') {
             Object.assign(next, { catalog: catalog.value, catalogNotice: null });
           } else {
             failures.push((catalog.reason as Error).message);
+            failedLists.add('catalog');
           }
         }
         if (assignmentsRead === latestAssignmentsRead) {
@@ -102,6 +126,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
             Object.assign(next, { assignments: assignments.value, assignmentsNotice: null });
           } else {
             failures.push((assignments.reason as Error).message);
+            failedLists.add('assignments');
           }
         }
         set(failures.length > 0 ? { ...next, error: failures[0] } : next);
@@ -117,6 +142,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
           const catalog = await catalogRepository.list();
           if (read === latestCatalogRead) {
             set({ catalog, catalogNotice: null });
+            readSucceeded('catalog');
           }
         } catch {
           if (read === latestCatalogRead) {
@@ -136,6 +162,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         set((state) => ({ assignments: upsertBy(state.assignments, assigned, 'skillId') }));
         if (exists) {
           // PUT is an upsert: an existing assignment keeps its place, no re-read needed.
+          supersedeAssignmentsReads();
           return assigned;
         }
         const read = ++latestAssignmentsRead;
@@ -143,6 +170,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
           const assignments = await personSkillRepository.list(personId);
           if (read === latestAssignmentsRead && isCurrent(personId)) {
             set({ assignments, assignmentsNotice: null });
+            readSucceeded('assignments');
           }
         } catch {
           if (read === latestAssignmentsRead && isCurrent(personId)) {

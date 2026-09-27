@@ -24,6 +24,8 @@ import { LoadInFlightError, REFRESH_NOTICE, requirePersonId, upsertBy } from './
  * load settles `loading`; only the newest read (load or post-write re-read)
  * sets the rows, the load's `error` or clears `notice`; and a write that
  * settles after the page moved to another person leaves that list alone.
+ * A remove (or 404 drop) does not re-read, so it supersedes any read issued
+ * before it settled; the load then only clears `loading`.
  * `notice` is cleared only by a successful read that lands (or a person
  * switch) — writes that do not re-read never clear it.
  */
@@ -77,9 +79,19 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       return personId;
     }
 
+    /**
+     * Drop a row without re-reading. Bumping `latestRead` discards any read
+     * issued before this settled — the server may have answered it before
+     * the delete, so landing it would bring the row back.
+     */
+    function dropRow(id: string) {
+      latestRead++;
+      set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+    }
+
     function dropIfGone(err: unknown, personId: string, id: string) {
       if (errorStatus(err) === 404 && isCurrent(personId)) {
-        set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+        dropRow(id);
       }
     }
 
@@ -134,7 +146,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
           throw err;
         }
         if (isCurrent(personId)) {
-          set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+          dropRow(id);
         }
       },
     };
