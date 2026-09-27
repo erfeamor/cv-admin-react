@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createSectionStore } from '../../application/sectionStore';
 import { emptyExperienceDraft, Experience, ExperienceInput, fromExperienceDraft, toExperienceDraft } from '../../domain/experience';
@@ -124,6 +124,24 @@ describe('SectionPage', () => {
     await waitFor(() => expect(screen.getByText('Globex')).toBeInTheDocument());
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByText('ACME')).toBeInTheDocument();
+  });
+
+  it('disables the form and the delete buttons while the list is loading', async () => {
+    const { useStore } = setup();
+
+    // The load starts on mount: nothing can be written until it settles.
+    expect(screen.getByLabelText('Company')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await screen.findByText('ACME');
+    expect(screen.getByLabelText('Company')).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Delete ACME' })).toBeEnabled();
+
+    act(() => useStore.setState({ loading: true }));
+    expect(screen.getByRole('button', { name: 'Delete ACME' })).toBeDisabled();
+    expect(screen.getByLabelText('Role')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   it('shows the empty state once loaded with no rows', async () => {

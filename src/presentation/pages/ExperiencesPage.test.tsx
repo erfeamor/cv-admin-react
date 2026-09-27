@@ -113,6 +113,7 @@ describe('ExperiencesPage', () => {
     const fetchMock = mockFetch((method, path) => (method === 'GET' && path === BASE ? { status: 200, body: [] } : undefined));
 
     renderPage();
+    await screen.findByText('No experience entries yet.'); // forms stay disabled until the load settles
     await fillRequired();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -178,6 +179,7 @@ describe('ExperiencesPage', () => {
     });
 
     renderPage();
+    await screen.findByText('No experience entries yet.'); // forms stay disabled until the load settles
     await fillRequired();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

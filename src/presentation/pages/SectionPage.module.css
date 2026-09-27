@@ -39,3 +39,18 @@
   padding: var(--space-1) var(--space-3);
   cursor: pointer;
 }
+
+/* Groups a page's write controls so one `disabled` covers them during a load; no visual box. */
+.writes {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.rowButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}

@@ -15,7 +15,8 @@ const EMPTY_ASSIGNMENT: SkillAssignmentDraft = { skillId: '', proficiency: 'INTE
 /**
  * Skills differ from the other sections: pick from the global catalog (or
  * add to it), set a proficiency, and unassign. Assign is the contract's PUT
- * upsert, so re-assigning an assigned skill updates it in place.
+ * upsert, so re-assigning an assigned skill updates it in place. The forms
+ * and Remove buttons are disabled while the lists load.
  */
 export default function SkillsPage() {
   const { id: personId = '' } = useParams();
@@ -24,7 +25,7 @@ export default function SkillsPage() {
 }
 
 function SkillsPageBody({ personId }: { personId: string }) {
-  const { catalog, assignments, loading, error, notice, load, createSkill, assign, unassign } = useSkillsStore();
+  const { catalog, assignments, loading, error, catalogNotice, assignmentsNotice, load, createSkill, assign, unassign } = useSkillsStore();
   const [assignment, setAssignment] = useState<SkillAssignmentDraft>(EMPTY_ASSIGNMENT);
   const [newSkill, setNewSkill] = useState<SkillDraft>(emptySkillDraft);
   const [problems, setProblems] = useState<string[]>([]);
@@ -92,7 +93,8 @@ function SkillsPageBody({ personId }: { personId: string }) {
       <Link to={`/people/${personId}/sections`}>Back to CV sections</Link>
       <h1>Skills</h1>
       {error && <p role="alert">Failed to load skills: {error}</p>}
-      {notice && <p role="status">{notice}</p>}
+      {catalogNotice && <p role="status">{catalogNotice}</p>}
+      {assignmentsNotice && <p role="status">{assignmentsNotice}</p>}
       {loading && assignments.length === 0 && <p>Loading…</p>}
       {!loading && !error && assignments.length === 0 && <p>No skills assigned yet.</p>}
       <ul className={styles.list} aria-label="Assigned skills">
@@ -114,6 +116,7 @@ function SkillsPageBody({ personId }: { personId: string }) {
               type="button"
               className={styles.rowButton}
               aria-label={`Remove ${entry.name}`}
+              disabled={loading}
               onClick={() => void handleUnassign(entry)}
             >
               Remove
@@ -122,13 +125,16 @@ function SkillsPageBody({ personId }: { personId: string }) {
         ))}
       </ul>
       <ProblemsAlert problems={problems} />
-      <SkillAssignmentForm
-        catalog={catalog}
-        value={assignment}
-        onChange={setAssignment}
-        onSubmit={() => void handleAssign()}
-      />
-      <NewSkillForm value={newSkill} onChange={setNewSkill} onSubmit={() => void handleCreateSkill()} />
+      {/* Writes wait for the load: the store refuses them mid-load anyway. */}
+      <fieldset className={styles.writes} disabled={loading}>
+        <SkillAssignmentForm
+          catalog={catalog}
+          value={assignment}
+          onChange={setAssignment}
+          onSubmit={() => void handleAssign()}
+        />
+        <NewSkillForm value={newSkill} onChange={setNewSkill} onSubmit={() => void handleCreateSkill()} />
+      </fieldset>
     </section>
   );
 }

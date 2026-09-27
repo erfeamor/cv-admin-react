@@ -46,7 +46,7 @@ describe('App section routes', () => {
     useExperiencesStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
     useEducationsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
     useProjectsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
-    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, notice: null });
+    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, catalogNotice: null, assignmentsNotice: null });
   });
 
   it.each([

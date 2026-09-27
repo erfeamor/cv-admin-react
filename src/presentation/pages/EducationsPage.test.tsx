@@ -61,6 +61,7 @@ describe('EducationsPage', () => {
     });
 
     renderPage();
+    await screen.findByText('No education entry entries yet.'); // forms stay disabled until the load settles
     fireEvent.change(screen.getByLabelText('Institution'), { target: { value: 'UNED' } });
     fireEvent.change(screen.getByLabelText('Degree'), { target: { value: 'BSc' } });
     fireEvent.change(screen.getByLabelText('Start date'), { target: { value: '2015-09-01' } });
