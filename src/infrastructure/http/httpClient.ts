@@ -15,11 +15,15 @@ export class HttpError extends Error {
   }
 }
 
-// The domain service answers 400 with Spring's JSON error body but 404/409
-// with plain text, so try JSON and fall back to the text.
+// Error bodies are not uniform: the section and person-skill controllers'
+// @ExceptionHandler answers 404 as plain text, while 400 (validation) and the
+// catalog's duplicate-name 409 (a ResponseStatusException) come back as Spring
+// Boot's default JSON error body ({ timestamp, status, error, path } — no
+// message, as server.error.include-message is not set). So: try JSON, fall
+// back to the text; an unreadable body (text() throwing) yields null.
 async function readErrorBody(response: Response): Promise<unknown> {
   try {
-    const text = typeof response.text === 'function' ? await response.text() : '';
+    const text = await response.text();
     if (!text) {
       return null;
     }

@@ -20,7 +20,7 @@ describe('httpClient errors', () => {
     expect((error as HttpError).body).toEqual(problem);
   });
 
-  it('keeps a plain-text error body as a string (the domain answers 404 as text)', async () => {
+  it('keeps a plain-text error body as a string (the section 404s are text)', async () => {
     global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404, text: async () => 'Not found' });
 
     const error = (await client.request('/x').catch((err: unknown) => err)) as HttpError;
@@ -30,8 +30,23 @@ describe('httpClient errors', () => {
     expect(error.message).toBe('Request to /x failed with status 404');
   });
 
-  it('tolerates an unreadable or empty error body', async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500 });
+  it('tolerates an empty error body', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, text: async () => '' });
+
+    const error = (await client.request('/x').catch((err: unknown) => err)) as HttpError;
+
+    expect(error.status).toBe(500);
+    expect(error.body).toBeNull();
+  });
+
+  it('tolerates an unreadable error body (text() rejects)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => {
+        throw new TypeError('body stream already read');
+      },
+    });
 
     const error = (await client.request('/x').catch((err: unknown) => err)) as HttpError;
 
