@@ -4,6 +4,7 @@ import { errorStatus } from '../../domain/errors';
 import { emptySkillDraft, fromSkillDraft, PersonSkill, SkillAssignmentDraft, SkillDraft } from '../../domain/skill';
 import { useSkillsStore } from '../../store';
 import NewSkillForm from '../components/NewSkillForm';
+import ProblemsAlert from '../components/ProblemsAlert';
 import SkillAssignmentForm from '../components/SkillAssignmentForm';
 import { describeWriteFailure } from '../errorMessages';
 import { PROFICIENCY_LABELS } from '../proficiencyLabels';
@@ -18,7 +19,12 @@ const EMPTY_ASSIGNMENT: SkillAssignmentDraft = { skillId: '', proficiency: 'INTE
  */
 export default function SkillsPage() {
   const { id: personId = '' } = useParams();
-  const { catalog, assignments, loading, error, load, createSkill, assign, unassign } = useSkillsStore();
+  // Keyed by person so the pickers' local state resets when :id changes.
+  return <SkillsPageBody key={personId} personId={personId} />;
+}
+
+function SkillsPageBody({ personId }: { personId: string }) {
+  const { catalog, assignments, loading, error, notice, load, createSkill, assign, unassign } = useSkillsStore();
   const [assignment, setAssignment] = useState<SkillAssignmentDraft>(EMPTY_ASSIGNMENT);
   const [newSkill, setNewSkill] = useState<SkillDraft>(emptySkillDraft);
   const [problems, setProblems] = useState<string[]>([]);
@@ -86,6 +92,7 @@ export default function SkillsPage() {
       <Link to={`/people/${personId}/sections`}>Back to CV sections</Link>
       <h1>Skills</h1>
       {error && <p role="alert">Failed to load skills: {error}</p>}
+      {notice && <p role="status">{notice}</p>}
       {loading && assignments.length === 0 && <p>Loading…</p>}
       {!loading && !error && assignments.length === 0 && <p>No skills assigned yet.</p>}
       <ul className={styles.list} aria-label="Assigned skills">
@@ -114,15 +121,7 @@ export default function SkillsPage() {
           </li>
         ))}
       </ul>
-      {problems.length > 0 && (
-        <div role="alert">
-          <ul className={styles.problems}>
-            {problems.map((problem) => (
-              <li key={problem}>{problem}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <ProblemsAlert problems={problems} />
       <SkillAssignmentForm
         catalog={catalog}
         value={assignment}

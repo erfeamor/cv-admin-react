@@ -28,3 +28,15 @@ describe('describeWriteFailure', () => {
     );
   });
 });
+
+describe('describeWriteFailure on create (review round 1, item 2)', () => {
+  it('a 404 on create means the person is gone, not the row', () => {
+    expect(describeWriteFailure(withStatus(404, 'Not found'), 'experience', 'create')).toBe(
+      'This person no longer exists — it was probably deleted elsewhere, so the experience could not be saved.',
+    );
+  });
+
+  it('a 404 on update keeps the edit-race message', () => {
+    expect(describeWriteFailure(withStatus(404), 'experience', 'update')).toMatch(/^This experience no longer exists/);
+  });
+});

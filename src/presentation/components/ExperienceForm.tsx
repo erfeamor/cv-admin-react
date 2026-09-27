@@ -39,7 +39,7 @@ export default function ExperienceForm({ title, value, onChange, onSubmit, onCan
         Location
         <input value={value.location} onChange={handleChange('location')} />
       </label>
-      <PeriodFields value={value} onChange={(period) => onChange({ ...value, ...period })} />
+      <PeriodFields value={value} onChange={(period) => onChange({ ...value, ...period })} startRequired />
       <label className={styles.field}>
         Description
         <textarea value={value.description} onChange={handleChange('description')} />

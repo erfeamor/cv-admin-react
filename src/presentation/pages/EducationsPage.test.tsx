@@ -37,7 +37,7 @@ describe('EducationsPage', () => {
     cleanup();
     global.fetch = originalFetch;
     jest.restoreAllMocks();
-    useEducationsStore.setState({ personId: null, items: [], loading: false, error: null });
+    useEducationsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
   });
 
   it('lists the entries in server order', async () => {

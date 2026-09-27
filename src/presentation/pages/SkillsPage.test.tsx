@@ -52,7 +52,7 @@ describe('SkillsPage', () => {
     cleanup();
     global.fetch = originalFetch;
     jest.restoreAllMocks();
-    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null });
+    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, notice: null });
   });
 
   it('renders the assigned skills and the catalog picker in the order served', async () => {

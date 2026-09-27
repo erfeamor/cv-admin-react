@@ -31,7 +31,7 @@ describe('ProjectsPage', () => {
     cleanup();
     global.fetch = originalFetch;
     jest.restoreAllMocks();
-    useProjectsStore.setState({ personId: null, items: [], loading: false, error: null });
+    useProjectsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
   });
 
   it('lists the entries in server order, undated last', async () => {
@@ -47,7 +47,7 @@ describe('ProjectsPage', () => {
     ]);
   });
 
-  it('creates with POST: only the name, "Current", every blank optional sent as null', async () => {
+  it('creates an undated project with POST: only the name, every blank optional (both dates too) sent as null', async () => {
     const fetchMock = mockFetch((method, path) => {
       if (method === 'GET' && path === BASE) return { status: 200, body: [] };
       if (method === 'POST' && path === BASE) return { status: 201, body: { ...dated, id: 5, name: 'new', startDate: null } };
@@ -56,7 +56,6 @@ describe('ProjectsPage', () => {
 
     renderPage();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'new' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(recordedRequests(fetchMock, 'POST')).toHaveLength(1));
@@ -102,6 +101,41 @@ describe('ProjectsPage', () => {
     expect(screen.queryByText('side-quest')).not.toBeInTheDocument();
   });
 
+  it('an undated project shows no period, is not pre-checked Current, and saves both dates as null', async () => {
+    const bare = { id: 3, name: 'bare', description: null, repoUrl: null, startDate: null, endDate: null };
+    const fetchMock = mockFetch((method, path) => {
+      if (method === 'GET' && path === BASE) return { status: 200, body: [dated, bare] };
+      if (method === 'PUT' && path === `${BASE}/3`) return { status: 200, body: { ...bare, name: 'bare 2' } };
+      return undefined;
+    });
+
+    renderPage();
+    const row = (await screen.findByText('bare')).closest('li') as HTMLElement;
+    expect(row.textContent).not.toMatch(/current/i);
+    expect(within(screen.getByText('cv-project').closest('li') as HTMLElement).getByText('2026-07-01 – current')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit bare' }));
+    expect(screen.getByRole('checkbox', { name: 'Current' })).not.toBeChecked();
+    expect(screen.getByLabelText('Start date')).not.toHaveAttribute('aria-required');
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'bare 2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1));
+    expect(recordedRequests(fetchMock, 'PUT')[0].body).toMatchObject({ name: 'bare 2', startDate: null, endDate: null });
+  });
+
+  it('Current without a start date is refused client-side', async () => {
+    const fetchMock = mockFetch((method, path) => (method === 'GET' && path === BASE ? { status: 200, body: [] } : undefined));
+
+    renderPage();
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('A current project needs a start date.');
+    expect(recordedRequests(fetchMock, 'POST')).toHaveLength(0);
+  });
+
   it('renders a 400 inline', async () => {
     mockFetch((method, path) => {
       if (method === 'GET' && path === BASE) return { status: 200, body: [] };
@@ -111,7 +145,6 @@ describe('ProjectsPage', () => {
 
     renderPage();
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'x'.repeat(200) } });
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('rejected this project as invalid (400)');

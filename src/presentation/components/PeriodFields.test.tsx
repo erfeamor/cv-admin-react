@@ -39,3 +39,13 @@ describe('PeriodFields', () => {
     expect(onChange).toHaveBeenCalledWith({ ...dated, endDate: '2024-01-31' });
   });
 });
+
+describe('PeriodFields startRequired', () => {
+  it('marks Start date aria-required only when asked', () => {
+    const { rerender } = render(<PeriodFields value={dated} onChange={jest.fn()} startRequired />);
+    expect(screen.getByLabelText('Start date')).toHaveAttribute('aria-required', 'true');
+
+    rerender(<PeriodFields value={dated} onChange={jest.fn()} />);
+    expect(screen.getByLabelText('Start date')).not.toHaveAttribute('aria-required');
+  });
+});

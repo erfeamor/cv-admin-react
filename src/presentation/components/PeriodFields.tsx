@@ -5,6 +5,8 @@ import styles from './SectionForm.module.css';
 interface PeriodFieldsProps {
   value: PeriodDraft;
   onChange: (value: PeriodDraft) => void;
+  /** Marks Start date aria-required (experience, education — not projects). */
+  startRequired?: boolean;
 }
 
 /**
@@ -13,7 +15,7 @@ interface PeriodFieldsProps {
  * `endDate: null`. Unchecked with a blank end date is left for validation
  * to reject — it never silently means "current".
  */
-export default function PeriodFields({ value, onChange }: PeriodFieldsProps) {
+export default function PeriodFields({ value, onChange, startRequired = false }: PeriodFieldsProps) {
   function handleDate(field: 'startDate' | 'endDate') {
     return (event: React.ChangeEvent<HTMLInputElement>) => onChange({ ...value, [field]: event.target.value });
   }
@@ -22,7 +24,12 @@ export default function PeriodFields({ value, onChange }: PeriodFieldsProps) {
     <>
       <label className={styles.field}>
         Start date
-        <input type="date" value={value.startDate} onChange={handleDate('startDate')} />
+        <input
+          type="date"
+          value={value.startDate}
+          onChange={handleDate('startDate')}
+          aria-required={startRequired || undefined}
+        />
       </label>
       <label className={styles.field}>
         End date

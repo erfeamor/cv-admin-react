@@ -33,6 +33,7 @@ describe('PersonSectionsPage', () => {
     renderAt('/people/7/sections');
 
     expect(await screen.findByRole('heading', { name: 'Jane Doe — CV sections' })).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'CV sections' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Experience' })).toHaveAttribute('href', '/people/7/experiences');
     expect(screen.getByRole('link', { name: 'Education' })).toHaveAttribute('href', '/people/7/educations');
     expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute('href', '/people/7/projects');

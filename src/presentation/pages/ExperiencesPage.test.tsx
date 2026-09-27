@@ -61,7 +61,7 @@ describe('ExperiencesPage', () => {
     global.fetch = originalFetch;
     sessionStorage.clear();
     jest.restoreAllMocks();
-    useExperiencesStore.setState({ personId: null, items: [], loading: false, error: null });
+    useExperiencesStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
   });
 
   it('lists the entries in server order — no client sort', async () => {
@@ -202,6 +202,36 @@ describe('ExperiencesPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('This experience no longer exists');
     expect(screen.queryByText(/Backend Engineer at ACME/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'New experience' })).toBeInTheDocument();
+  });
+
+  it('a POST answered 404 (person deleted) says so and keeps the draft', async () => {
+    mockFetch((method, path) => {
+      if (method === 'GET' && path === BASE) return { status: 200, body: [past] };
+      if (method === 'POST' && path === BASE) return { status: 404, body: 'Not found' };
+      return undefined;
+    });
+
+    renderPage();
+    await screen.findByText(/Backend Engineer at ACME/);
+    await fillRequired();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Current' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This person no longer exists — it was probably deleted elsewhere, so the experience could not be saved.',
+    );
+    expect(screen.getByLabelText('Company')).toHaveValue('Globex');
+    expect(screen.getByRole('checkbox', { name: 'Current' })).toBeChecked();
+    expect(screen.getByText(/Backend Engineer at ACME/)).toBeInTheDocument();
+  });
+
+  it('marks Start date as required', async () => {
+    mockFetch((method, path) => (method === 'GET' && path === BASE ? { status: 200, body: [] } : undefined));
+
+    renderPage();
+
+    expect(screen.getByLabelText('Start date')).toHaveAttribute('aria-required', 'true');
+    await screen.findByText('No experience entries yet.');
   });
 
   it('shows an alert when the list fails to load', async () => {

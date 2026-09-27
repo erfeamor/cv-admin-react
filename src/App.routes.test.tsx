@@ -43,10 +43,10 @@ describe('App section routes', () => {
     global.fetch = originalFetch;
     sessionStorage.clear();
     usePeopleStore.setState({ people: [], selectedPerson: null, loading: false, error: null });
-    useExperiencesStore.setState({ personId: null, items: [], loading: false, error: null });
-    useEducationsStore.setState({ personId: null, items: [], loading: false, error: null });
-    useProjectsStore.setState({ personId: null, items: [], loading: false, error: null });
-    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null });
+    useExperiencesStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
+    useEducationsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
+    useProjectsStore.setState({ personId: null, items: [], loading: false, error: null, notice: null });
+    useSkillsStore.setState({ personId: null, catalog: [], assignments: [], loading: false, error: null, notice: null });
   });
 
   it.each([

@@ -29,7 +29,7 @@ export default function PersonSectionsPage() {
     <section className={styles.page}>
       <Link to="/people">Back to people</Link>
       <h1>{name} — CV sections</h1>
-      <ul className={styles.list}>
+      <ul className={styles.list} aria-label="CV sections">
         {SECTIONS.map(({ segment, label }) => (
           <li key={segment}>
             <Link to={`/people/${id}/${segment}`}>{label}</Link>

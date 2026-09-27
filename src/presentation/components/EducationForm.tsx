@@ -38,7 +38,7 @@ export default function EducationForm({ title, value, onChange, onSubmit, onCanc
         Field of study
         <input value={value.fieldOfStudy} onChange={handleChange('fieldOfStudy')} />
       </label>
-      <PeriodFields value={value} onChange={(period) => onChange({ ...value, ...period })} />
+      <PeriodFields value={value} onChange={(period) => onChange({ ...value, ...period })} startRequired />
       <FormActions onCancel={onCancel} />
     </form>
   );
