@@ -202,3 +202,57 @@ describe('skillsStore races (review round 1, items 1, 7, 8)', () => {
     expect(store.getState().catalog.map((skill) => skill.id)).toEqual(['5', '2', '9']);
   });
 });
+
+describe('skillsStore round 2: load vs write re-read, notice lifetime', () => {
+  it('an assign re-read during an in-flight load does not strand loading or drop the fresh catalog', async () => {
+    let resolveLoadList!: (rows: PersonSkill[]) => void;
+    const rust: Skill = { id: '9', name: 'Rust', category: null };
+    const assignedJava: PersonSkill = { skillId: '2', name: 'Java', category: 'Language', proficiency: 'ADVANCED' };
+    const { catalog, personSkills } = fakes(
+      { list: jest.fn().mockResolvedValue([zig, java, rust]) },
+      {
+        list: jest
+          .fn()
+          .mockReturnValueOnce(new Promise<PersonSkill[]>((resolve) => (resolveLoadList = resolve)))
+          .mockResolvedValueOnce([assignedJava, assignedZig]),
+      },
+    );
+    const store = createSkillsStore(catalog, personSkills);
+
+    const loading = store.getState().load('7');
+    await store.getState().assign('2', 'ADVANCED');
+    resolveLoadList([assignedZig]);
+    await loading;
+
+    expect(store.getState().loading).toBe(false);
+    expect(store.getState().catalog).toEqual([zig, java, rust]);
+    // The write's re-read is newer than the load's read: it keeps the list.
+    expect(store.getState().assignments).toEqual([assignedJava, assignedZig]);
+  });
+
+  it('any later successful write or re-read clears the refresh notice', async () => {
+    const { catalog, personSkills } = fakes();
+    const store = createSkillsStore(catalog, personSkills);
+    await store.getState().load('7');
+
+    const raiseNotice = async () => {
+      // Make '2' a new assignment again so the assign triggers a (failing) re-read.
+      store.setState((state) => ({ assignments: state.assignments.filter((entry) => entry.skillId !== '2') }));
+      (personSkills.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
+      await store.getState().assign('2', 'ADVANCED');
+      expect(store.getState().notice).not.toBeNull();
+    };
+
+    await raiseNotice();
+    await store.getState().unassign('2');
+    expect(store.getState().notice).toBeNull();
+
+    await raiseNotice();
+    await store.getState().createSkill({ name: 'Rust', category: null });
+    expect(store.getState().notice).toBeNull();
+
+    await raiseNotice();
+    await store.getState().assign('5', 'EXPERT'); // in place, no re-read
+    expect(store.getState().notice).toBeNull();
+  });
+});

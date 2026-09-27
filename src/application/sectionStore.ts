@@ -18,9 +18,10 @@ import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
  * visible at once and survives a failed re-read (which raises `notice`, not
  * the blocking `error`).
  *
- * Races: every list read takes a sequence number and only the latest may
- * land; a write that settles after the page moved to another person leaves
- * that person's list alone.
+ * Races: only the newest load settles `loading`/`error`, only the newest
+ * read (load or post-write re-read) sets the rows, and a write that settles
+ * after the page moved to another person leaves that person's list alone.
+ * Any later successful write or read clears `notice`.
  */
 export interface SectionState<TEntity extends { id: string }, TInput> {
   personId: string | null;
@@ -38,22 +39,29 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
   repository: SectionRepository<TEntity, TInput>,
 ) {
   return create<SectionState<TEntity, TInput>>()((set, get) => {
+    // Two sequences: `latestLoad` decides who settles `loading`/`error` (only
+    // the newest load), `latestRead` decides whose rows land (the newest read
+    // of any kind — a write's re-read is newer than an in-flight load's).
+    let latestLoad = 0;
     let latestRead = 0;
 
     const isCurrent = (personId: string) => get().personId === personId;
 
-    async function refresh(personId: string, afterWrite: boolean) {
+    async function readList(personId: string): Promise<{ read: number; items?: TEntity[]; err?: unknown }> {
       const read = ++latestRead;
       try {
-        const items = await repository.list(personId);
-        if (read === latestRead && isCurrent(personId)) {
-          set({ items, loading: false, notice: null });
-        }
+        return { read, items: await repository.list(personId) };
       } catch (err) {
-        if (read === latestRead && isCurrent(personId)) {
-          set(afterWrite ? { notice: REFRESH_NOTICE, loading: false } : { error: (err as Error).message, loading: false });
-        }
+        return { read, err };
       }
+    }
+
+    async function refreshAfterWrite(personId: string) {
+      const { read, items } = await readList(personId);
+      if (read !== latestRead || !isCurrent(personId)) {
+        return;
+      }
+      set(items ? { items, notice: null } : { notice: REFRESH_NOTICE });
     }
 
     function dropIfGone(err: unknown, personId: string, id: string) {
@@ -70,8 +78,18 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
       notice: null,
 
       load: async (personId) => {
+        const load = ++latestLoad;
         set({ personId, items: isCurrent(personId) ? get().items : [], loading: true, error: null, notice: null });
-        await refresh(personId, false);
+        const { read, items, err } = await readList(personId);
+        if (load !== latestLoad || !isCurrent(personId)) {
+          return;
+        }
+        const rowsAreLatest = read === latestRead;
+        if (items) {
+          set({ loading: false, ...(rowsAreLatest ? { items } : {}) });
+        } else {
+          set({ loading: false, error: (err as Error).message });
+        }
       },
 
       save: async (input, id) => {
@@ -87,7 +105,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
         }
         if (isCurrent(personId)) {
           set((state) => ({ items: upsertBy(state.items, saved, 'id'), error: null }));
-          await refresh(personId, true);
+          await refreshAfterWrite(personId);
         }
         return saved;
       },
@@ -101,7 +119,7 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
           throw err;
         }
         if (isCurrent(personId)) {
-          set((state) => ({ items: state.items.filter((item) => item.id !== id) }));
+          set((state) => ({ items: state.items.filter((item) => item.id !== id), notice: null }));
         }
       },
     };

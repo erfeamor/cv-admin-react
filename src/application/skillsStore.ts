@@ -9,8 +9,10 @@ import { REFRESH_NOTICE, requirePersonId, upsertBy } from './collections';
  * assignments. Same error split as the other stores (`load` records, writes
  * throw). Both lists stay in server order — after a write that can move a
  * row, the list is re-read rather than sorted here; a failed re-read raises
- * the non-blocking `notice`. Same race rules as sectionStore: only the
- * latest read lands, and writes settling after a person change are ignored.
+ * the non-blocking `notice`, which any later successful write or read clears.
+ * Same race rules as sectionStore: only the newest load settles `loading`,
+ * only the newest read of each list lands, and writes settling after a
+ * person change are ignored.
  */
 export interface SkillsState {
   personId: string | null;
@@ -27,7 +29,11 @@ export interface SkillsState {
 
 export function createSkillsStore(catalogRepository: SkillCatalogRepository, personSkillRepository: PersonSkillRepository) {
   return create<SkillsState>()((set, get) => {
-    let latestPersonRead = 0;
+    // As in sectionStore: `latestLoad` decides who settles `loading`/`error`;
+    // `latestAssignmentsRead` / `latestCatalogRead` decide whose rows land, so
+    // a write's re-read never strands an in-flight load (or vice versa).
+    let latestLoad = 0;
+    let latestAssignmentsRead = 0;
     let latestCatalogRead = 0;
 
     const isCurrent = (personId: string) => get().personId === personId;
@@ -45,7 +51,8 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
       notice: null,
 
       load: async (personId) => {
-        const read = ++latestPersonRead;
+        const load = ++latestLoad;
+        const assignmentsRead = ++latestAssignmentsRead;
         const catalogRead = ++latestCatalogRead;
         set({
           personId,
@@ -59,11 +66,15 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
             catalogRepository.list(),
             personSkillRepository.list(personId),
           ]);
-          if (read === latestPersonRead && isCurrent(personId)) {
-            set({ assignments, loading: false, ...(catalogRead === latestCatalogRead ? { catalog } : {}) });
+          if (load === latestLoad && isCurrent(personId)) {
+            set({
+              loading: false,
+              ...(catalogRead === latestCatalogRead ? { catalog } : {}),
+              ...(assignmentsRead === latestAssignmentsRead ? { assignments } : {}),
+            });
           }
         } catch (err) {
-          if (read === latestPersonRead && isCurrent(personId)) {
+          if (load === latestLoad && isCurrent(personId)) {
             set({ error: (err as Error).message, loading: false });
           }
         }
@@ -77,7 +88,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         try {
           const catalog = await catalogRepository.list();
           if (read === latestCatalogRead) {
-            set({ catalog });
+            set({ catalog, notice: null });
           }
         } catch {
           if (read === latestCatalogRead) {
@@ -97,16 +108,17 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         set((state) => ({ assignments: upsertBy(state.assignments, assigned, 'skillId') }));
         if (exists) {
           // PUT is an upsert: an existing assignment keeps its place, no re-read needed.
+          set({ notice: null });
           return assigned;
         }
-        const read = ++latestPersonRead;
+        const read = ++latestAssignmentsRead;
         try {
           const assignments = await personSkillRepository.list(personId);
-          if (read === latestPersonRead && isCurrent(personId)) {
+          if (read === latestAssignmentsRead && isCurrent(personId)) {
             set({ assignments, notice: null });
           }
         } catch {
-          if (read === latestPersonRead && isCurrent(personId)) {
+          if (read === latestAssignmentsRead && isCurrent(personId)) {
             set({ notice: REFRESH_NOTICE });
           }
         }
@@ -126,6 +138,7 @@ export function createSkillsStore(catalogRepository: SkillCatalogRepository, per
         }
         if (isCurrent(personId)) {
           drop(skillId);
+          set({ notice: null });
         }
       },
     };

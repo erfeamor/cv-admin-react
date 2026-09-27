@@ -250,3 +250,38 @@ describe('sectionStore races (review round 1, items 1, 7, 8)', () => {
     expect(store.getState().notice).toBeNull();
   });
 });
+
+describe('sectionStore round 2: load vs write re-read, notice lifetime', () => {
+  it('a save re-read during an in-flight load settles loading and keeps the newer list', async () => {
+    let resolveLoad!: (rows: Experience[]) => void;
+    const created = { id: '3', ...input };
+    const repository = fakeRepository({
+      list: jest
+        .fn()
+        .mockReturnValueOnce(new Promise<Experience[]>((resolve) => (resolveLoad = resolve)))
+        .mockResolvedValueOnce([created, newer, older]),
+    });
+    const store = createSectionStore(repository);
+
+    const loading = store.getState().load('7');
+    await store.getState().save(input);
+    resolveLoad([newer, older]);
+    await loading;
+
+    expect(store.getState().loading).toBe(false);
+    expect(store.getState().items).toEqual([created, newer, older]);
+  });
+
+  it('a later successful remove clears the refresh notice', async () => {
+    const repository = fakeRepository();
+    const store = createSectionStore(repository);
+    await store.getState().load('7');
+    (repository.list as jest.Mock).mockRejectedValueOnce(new Error('flaky'));
+    await store.getState().save(input);
+    expect(store.getState().notice).not.toBeNull();
+
+    await store.getState().remove('1');
+
+    expect(store.getState().notice).toBeNull();
+  });
+});
