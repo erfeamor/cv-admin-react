@@ -17,6 +17,8 @@ npm run build-storybook    # static Storybook (CI gate only, not deployed)
 
 CI: `.drone.yml` (install → lint → typecheck → test → build → build-storybook, sequential to fit the 1 GB Drone runner host; master pushes then deploy to S3 `/admin/` + CloudFront invalidation).
 
+The deploy step's secrets (`aws_access_key_id`, `aws_secret_access_key`) belong to the `cv-project-drone-deploy` IAM user. Since T-008 (2026-09-28) the key is **Terraform-managed** and its source of truth is SSM (`/cv-project/dev/deploy/drone-deploy/*`), not the Drone UI. After any Drone rebuild or key rotation, set them with `cv-infra/scripts/drone-reseed-secrets.sh`, following the runbook `cv-infra/docs/drone-host-backup-and-cutover.md`. Don't hand-edit them in the Drone UI.
+
 Storybook (`.storybook/`, framework `@storybook/react-vite`, addons docs + a11y): co-located `*.stories.tsx` per presentation component. Controlled components get a stateful harness in the story file (`PersonForm.stories.tsx` pattern); interaction tests are play functions using `storybook/test`. Jest remains the only CI test runner — stories are compile-checked by `build-storybook`, and play functions run in the Storybook UI.
 
 ## Architecture & conventions
