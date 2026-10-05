@@ -9,7 +9,8 @@ export interface CrudRepository<TEntity, TInput> {
   list(): Promise<TEntity[]>;
   get(id: string): Promise<TEntity>;
   create(input: TInput): Promise<TEntity>;
-  update(id: string, input: TInput): Promise<TEntity>;
+  /** `version` is the one the edit was based on (contract rule 8); undefined → omitted from the request. */
+  update(id: string, input: TInput, version: number | undefined): Promise<TEntity>;
   remove(id: string): Promise<void>;
 }
 
@@ -25,7 +26,8 @@ export type PersonRepository = CrudRepository<Person, PersonInput>;
 export interface SectionRepository<TEntity, TInput> {
   list(personId: string): Promise<TEntity[]>;
   create(personId: string, input: TInput): Promise<TEntity>;
-  update(personId: string, id: string, input: TInput): Promise<TEntity>;
+  /** `version` is the one the edit was based on (contract rule 8); undefined → omitted from the request. */
+  update(personId: string, id: string, input: TInput, version: number | undefined): Promise<TEntity>;
   remove(personId: string, id: string): Promise<void>;
 }
 

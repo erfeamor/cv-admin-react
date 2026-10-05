@@ -101,9 +101,9 @@ describe('peopleStore', () => {
     await store.getState().loadPeople();
 
     const input: PersonInput = { fullName: 'Jane Smith', email: 'jane@example.com' };
-    await store.getState().savePerson(input, '1');
+    await store.getState().savePerson(input, '1', 0);
 
-    expect(repository.update).toHaveBeenCalledWith('1', input);
+    expect(repository.update).toHaveBeenCalledWith('1', input, 0);
     expect(store.getState().people).toHaveLength(2);
     expect(store.getState().people[0].fullName).toBe('Jane Smith');
   });
@@ -116,6 +116,53 @@ describe('peopleStore', () => {
     await expect(
       store.getState().savePerson({ fullName: 'X', email: 'x@example.com' }),
     ).rejects.toThrow('rejected');
+  });
+
+  describe('optimistic concurrency (T-303, contract rule 8)', () => {
+    it('after a successful update the stored person carries the response\'s version', async () => {
+      const repository = fakeRepository({
+        list: jest.fn().mockResolvedValue([{ ...jane, version: 2 }, john]),
+        update: jest.fn().mockImplementation(async (id: string, input: PersonInput) => ({ id, ...input, version: 3 })),
+      });
+      const store = createPeopleStore(repository);
+      await store.getState().loadPeople();
+
+      await store.getState().savePerson({ fullName: 'Jane Smith', email: 'jane@example.com' }, '1', 2);
+
+      expect(repository.update).toHaveBeenCalledWith('1', { fullName: 'Jane Smith', email: 'jane@example.com' }, 2);
+      expect(store.getState().selectedPerson?.version).toBe(3);
+      expect(store.getState().people[0].version).toBe(3);
+    });
+
+    it('a 409 throws to the form and leaves the list and selection untouched, without retrying', async () => {
+      const conflict = Object.assign(new Error('Request failed with status 409'), { status: 409 });
+      const repository = fakeRepository({ update: jest.fn().mockRejectedValue(conflict) });
+      const store = createPeopleStore(repository);
+      await store.getState().loadPeople();
+      await store.getState().selectPerson('1');
+
+      await expect(store.getState().savePerson({ fullName: 'X', email: 'x@example.com' }, '1', 0)).rejects.toMatchObject({
+        status: 409,
+      });
+
+      expect(repository.update).toHaveBeenCalledTimes(1);
+      expect(store.getState().people).toEqual([jane, john]);
+      expect(store.getState().selectedPerson).toEqual(jane);
+    });
+
+    it('a 404 on update (deleted meanwhile) drops the person from list and selection, then throws', async () => {
+      const gone = Object.assign(new Error('Request failed with status 404'), { status: 404 });
+      const store = createPeopleStore(fakeRepository({ update: jest.fn().mockRejectedValue(gone) }));
+      await store.getState().loadPeople();
+      await store.getState().selectPerson('1');
+
+      await expect(store.getState().savePerson({ fullName: 'X', email: 'x@example.com' }, '1', 0)).rejects.toMatchObject({
+        status: 404,
+      });
+
+      expect(store.getState().people).toEqual([john]);
+      expect(store.getState().selectedPerson).toBeNull();
+    });
   });
 
   it('removePerson drops the person from list and selection', async () => {

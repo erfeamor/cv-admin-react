@@ -1,6 +1,6 @@
 import { Person, PersonInput } from '../../domain/person';
 import { PersonRepository } from '../../domain/ports';
-import { HttpClient } from './httpClient';
+import { HttpClient, withVersion } from './httpClient';
 
 // The domain service serializes ids as JSON numbers (Java Long). The domain
 // speaks string ids (they travel through URLs), so this adapter owns the
@@ -22,11 +22,11 @@ export function createPersonHttpRepository(client: HttpClient): PersonRepository
           body: JSON.stringify(input),
         }),
       ),
-    update: async (id, input: PersonInput) =>
+    update: async (id, input: PersonInput, version) =>
       toPerson(
         await client.request<PersonDto>(`/api/v1/people/${id}`, {
           method: 'PUT',
-          body: JSON.stringify(input),
+          body: JSON.stringify(withVersion(input, version)),
         }),
       ),
     remove: (id) =>

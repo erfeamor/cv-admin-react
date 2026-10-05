@@ -8,9 +8,15 @@ export interface Education {
   fieldOfStudy: string | null;
   startDate: string;
   endDate: string | null;
+  /**
+   * Optimistic-concurrency token (contract rule 8): 0 on create, bumped by every
+   * successful PUT. Optional because a pre-T-113 server does not send it.
+   */
+  version?: number;
 }
 
-export type EducationInput = Omit<Education, 'id'>;
+/** Form-owned fields: what POST and PUT send. The version travels beside it, on update only. */
+export type EducationInput = Omit<Education, 'id' | 'version'>;
 
 export interface EducationDraft extends PeriodDraft {
   institution: string;

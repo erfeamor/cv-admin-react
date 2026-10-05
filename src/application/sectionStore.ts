@@ -37,8 +37,20 @@ export interface SectionState<TEntity extends { id: string }, TInput> {
   /** Non-blocking: a write succeeded but the re-read failed; cleared only by a later successful read. */
   notice: string | null;
   load: (personId: string) => Promise<void>;
-  save: (input: TInput, id?: string) => Promise<TEntity>;
+  /**
+   * Create (no id) or update. An update sends `version`, the one the edit was
+   * based on (contract rule 8); a stale one rejects with status 409, which is
+   * rethrown untouched — never retried — so the form keeps the user's edits.
+   * The saved row (with the server's new version) replaces the stored one.
+   */
+  save: (input: TInput, id?: string, version?: number) => Promise<TEntity>;
   remove: (id: string) => Promise<void>;
+  /**
+   * After a 409: re-read the list (as `load` does) and return the latest row
+   * with its version, or null when it was deleted meanwhile. Rejects when the
+   * read fails (the failure is also recorded in `error`, as for `load`).
+   */
+  reload: (id: string) => Promise<TEntity | null>;
 }
 
 export function createSectionStore<TEntity extends { id: string }, TInput>(
@@ -122,11 +134,11 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
         }
       },
 
-      save: async (input, id) => {
+      save: async (input, id, version) => {
         const personId = writablePersonId();
         let saved: TEntity;
         try {
-          saved = id ? await repository.update(personId, id, input) : await repository.create(personId, input);
+          saved = id ? await repository.update(personId, id, input, version) : await repository.create(personId, input);
         } catch (err) {
           if (id) {
             dropIfGone(err, personId, id);
@@ -151,6 +163,16 @@ export function createSectionStore<TEntity extends { id: string }, TInput>(
         if (isCurrent(personId)) {
           dropRow(id);
         }
+      },
+
+      reload: async (id) => {
+        const personId = requirePersonId(get().personId);
+        await get().load(personId);
+        const { error, items } = get();
+        if (error !== null) {
+          throw new Error(error);
+        }
+        return items.find((item) => item.id === id) ?? null;
       },
     };
   });

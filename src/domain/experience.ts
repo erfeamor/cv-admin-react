@@ -9,9 +9,15 @@ export interface Experience {
   startDate: string;
   endDate: string | null;
   description: string | null;
+  /**
+   * Optimistic-concurrency token (contract rule 8): 0 on create, bumped by every
+   * successful PUT. Optional because a pre-T-113 server does not send it.
+   */
+  version?: number;
 }
 
-export type ExperienceInput = Omit<Experience, 'id'>;
+/** Form-owned fields: what POST and PUT send. The version travels beside it, on update only. */
+export type ExperienceInput = Omit<Experience, 'id' | 'version'>;
 
 export interface ExperienceDraft extends PeriodDraft {
   company: string;

@@ -105,9 +105,9 @@ describe('sectionStore', () => {
     const changed = { ...input, startDate: older.startDate };
     (repository.list as jest.Mock).mockResolvedValue([newer, { id: '1', ...changed }]);
 
-    await store.getState().save(changed, '1');
+    await store.getState().save(changed, '1', 0);
 
-    expect(repository.update).toHaveBeenCalledWith('7', '1', changed);
+    expect(repository.update).toHaveBeenCalledWith('7', '1', changed, 0);
     expect(store.getState().items).toEqual([newer, { id: '1', ...changed }]);
   });
 
@@ -135,6 +135,85 @@ describe('sectionStore', () => {
 
     await expect(store.getState().save(input, '1')).rejects.toMatchObject({ status: 404 });
     expect(store.getState().items).toEqual([newer]);
+  });
+
+  describe('optimistic concurrency (T-303, contract rule 8)', () => {
+    function conflict() {
+      return Object.assign(new Error('Request failed with status 409'), { status: 409, body: { status: 409 } });
+    }
+
+    it('an update without a known version passes undefined, so the adapter can omit it', async () => {
+      const repository = fakeRepository();
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+
+      await store.getState().save(input, '1');
+
+      expect(repository.update).toHaveBeenCalledWith('7', '1', input, undefined);
+    });
+
+    it('after a successful update the stored row carries the response\'s version', async () => {
+      const repository = fakeRepository({
+        list: jest.fn().mockResolvedValue([newer, { ...older, version: 4 }]),
+        update: jest.fn().mockImplementation(async (_p: string, id: string, value: ExperienceInput) => ({ id, ...value, version: 5 })),
+      });
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+      // The re-read fails, so only the PUT response can have set the version.
+      (repository.list as jest.Mock).mockRejectedValue(new Error('down'));
+
+      const saved = await store.getState().save(input, '1', 4);
+
+      expect(repository.update).toHaveBeenCalledWith('7', '1', input, 4);
+      expect(saved.version).toBe(5);
+      expect(store.getState().items.find((item) => item.id === '1')?.version).toBe(5);
+    });
+
+    it('a 409 (stale version) throws to the form, keeps the row and the list, and never retries', async () => {
+      const repository = fakeRepository({ update: jest.fn().mockRejectedValue(conflict()) });
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+
+      await expect(store.getState().save(input, '1', 0)).rejects.toMatchObject({ status: 409 });
+
+      expect(repository.update).toHaveBeenCalledTimes(1);
+      expect(store.getState().items).toEqual([newer, older]);
+      expect(store.getState().error).toBeNull();
+    });
+
+    it('reload re-reads the list and returns the latest row, with its version', async () => {
+      const repository = fakeRepository({ list: jest.fn().mockResolvedValue([newer, { ...older, version: 0 }]) });
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+      const latest = { ...older, company: 'Changed elsewhere', version: 1 };
+      (repository.list as jest.Mock).mockResolvedValue([newer, latest]);
+
+      const row = await store.getState().reload('1');
+
+      expect(row).toEqual(latest);
+      expect(store.getState().items).toEqual([newer, latest]);
+      expect(store.getState().loading).toBe(false);
+    });
+
+    it('reload resolves null when the row was deleted meanwhile', async () => {
+      const repository = fakeRepository();
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+      (repository.list as jest.Mock).mockResolvedValue([newer]);
+
+      await expect(store.getState().reload('1')).resolves.toBeNull();
+      expect(store.getState().items).toEqual([newer]);
+    });
+
+    it('reload rejects (and records the load error) when the re-read fails', async () => {
+      const repository = fakeRepository();
+      const store = createSectionStore(repository);
+      await store.getState().load('7');
+      (repository.list as jest.Mock).mockRejectedValue(new Error('down'));
+
+      await expect(store.getState().reload('1')).rejects.toThrow('down');
+      expect(store.getState().error).toBe('down');
+    });
   });
 
   it('remove deletes under the person and drops the row', async () => {

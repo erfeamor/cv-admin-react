@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { usePeopleStore } from '../../store';
+import { mockFetch, recordedRequests } from '../../testing/mockFetch';
 import PersonFormPage from './PersonFormPage';
 
 const jane = {
@@ -115,5 +116,81 @@ describe('PersonFormPage', () => {
     expect(url).toMatch(/\/api\/v1\/people\/1$/);
     expect(options.method).toBe('PUT');
     expect(JSON.parse(options.body).fullName).toBe('Jane Smith');
+  });
+
+  describe('stale version (T-303)', () => {
+    const versioned = { ...jane, id: 1, version: 2 };
+
+    it('a PUT carries the version the person was read with', async () => {
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === '/api/v1/people/1') return { status: 200, body: versioned };
+        if (method === 'PUT' && path === '/api/v1/people/1') return { status: 200, body: { ...versioned, version: 3 } };
+        if (method === 'GET' && path === '/api/v1/people') return { status: 200, body: [] };
+        return undefined;
+      });
+
+      renderAt('/people/1');
+      await waitFor(() => expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1));
+      expect(recordedRequests(fetchMock, 'PUT')[0].body).toMatchObject({ fullName: 'Jane Doe', version: 2 });
+    });
+
+    it('a PUT for a person without a version (pre-T-113 server) sends no version key', async () => {
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === '/api/v1/people/1') return { status: 200, body: jane };
+        if (method === 'PUT' && path === '/api/v1/people/1') return { status: 200, body: jane };
+        return undefined;
+      });
+
+      renderAt('/people/1');
+      await waitFor(() => expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1));
+      expect(recordedRequests(fetchMock, 'PUT')[0].body).not.toHaveProperty('version');
+    });
+
+    it('a 409 keeps the edits; Reload refetches and shows the server values', async () => {
+      let served: unknown = versioned;
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === '/api/v1/people/1') return { status: 200, body: served };
+        if (method === 'PUT' && path === '/api/v1/people/1') return { status: 409, body: { status: 409, title: 'Conflict' } };
+        return undefined;
+      });
+
+      renderAt('/people/1');
+      const nameInput = screen.getByLabelText('Full name');
+      await waitFor(() => expect(nameInput).toHaveValue('Jane Doe'));
+      fireEvent.change(nameInput, { target: { value: 'My edit' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText('This entry was changed elsewhere.')).toBeInTheDocument();
+      expect(screen.getByLabelText('Full name')).toHaveValue('My edit');
+      expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1);
+
+      served = { ...versioned, fullName: 'Jane Changed', version: 3 };
+      fireEvent.click(screen.getByRole('button', { name: 'Reload and discard my edits' }));
+
+      await waitFor(() => expect(screen.getByLabelText('Full name')).toHaveValue('Jane Changed'));
+      expect(screen.queryByText('This entry was changed elsewhere.')).not.toBeInTheDocument();
+    });
+
+    it('a 404 on PUT says the person was deleted and hides the form', async () => {
+      mockFetch((method, path) => {
+        if (method === 'GET' && path === '/api/v1/people/1') return { status: 200, body: versioned };
+        if (method === 'PUT' && path === '/api/v1/people/1') return { status: 404, body: 'Not found' };
+        return undefined;
+      });
+
+      renderAt('/people/1');
+      await waitFor(() => expect(screen.getByLabelText('Full name')).toHaveValue('Jane Doe'));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('This person no longer exists');
+      expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Back to people' })).toBeInTheDocument();
+    });
   });
 });

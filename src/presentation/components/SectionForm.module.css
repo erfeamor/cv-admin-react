@@ -82,3 +82,17 @@
   margin: 0;
   padding-inline-start: var(--space-4);
 }
+
+/* ConflictAlert: the stale-version 409 notice with its Reload action. */
+.conflict {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+
+  & p {
+    margin: 0;
+  }
+}

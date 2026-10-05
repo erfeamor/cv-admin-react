@@ -3,8 +3,9 @@ import { Link, useParams } from 'react-router-dom';
 import type { SectionState } from '../../application/sectionStore';
 import { DraftResult } from '../../domain/draft';
 import { errorStatus } from '../../domain/errors';
+import ConflictAlert from '../components/ConflictAlert';
 import ProblemsAlert from '../components/ProblemsAlert';
-import { describeWriteFailure } from '../errorMessages';
+import { describeDeleted, describeWriteFailure, isChangedElsewhere } from '../errorMessages';
 import styles from './SectionPage.module.css';
 
 export interface SectionFormProps<TDraft> {
@@ -15,7 +16,7 @@ export interface SectionFormProps<TDraft> {
   onCancel?: () => void;
 }
 
-interface SectionPageProps<TEntity extends { id: string }, TInput, TDraft> {
+interface SectionPageProps<TEntity extends { id: string; version?: number }, TInput, TDraft> {
   /** Page heading, e.g. "Experience". */
   heading: string;
   /** Singular noun for titles and messages, e.g. "experience". */
@@ -49,14 +50,14 @@ export function formatPeriod(startDate: string | null, endDate: string | null): 
  * order — never sorted here. Keyed by person so local form state resets when
  * `:id` changes. The form and Delete buttons are disabled while the list loads.
  */
-export default function SectionPage<TEntity extends { id: string }, TInput, TDraft>(
+export default function SectionPage<TEntity extends { id: string; version?: number }, TInput, TDraft>(
   props: SectionPageProps<TEntity, TInput, TDraft>,
 ) {
   const { id: personId = '' } = useParams();
   return <SectionPageBody key={personId} personId={personId} {...props} />;
 }
 
-function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
+function SectionPageBody<TEntity extends { id: string; version?: number }, TInput, TDraft>({
   personId,
   heading,
   noun,
@@ -68,9 +69,15 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
   details,
   Form,
 }: SectionPageProps<TEntity, TInput, TDraft> & { personId: string }) {
-  const { items, loading, error, notice, load, save, remove } = useStore();
+  const { items, loading, error, notice, load, save, remove, reload } = useStore();
   const [draft, setDraft] = useState<TDraft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // The version the draft was built from (contract rule 8) — captured when the
+  // edit starts, not read from the list at save time, so a list refresh while
+  // editing cannot turn a stale edit into a silent overwrite.
+  const [editingVersion, setEditingVersion] = useState<number | undefined>(undefined);
+  const [conflict, setConflict] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [problems, setProblems] = useState<string[]>([]);
 
   useEffect(() => {
@@ -79,13 +86,40 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
 
   function resetForm() {
     setEditingId(null);
+    setEditingVersion(undefined);
+    setConflict(false);
     setDraft(emptyDraft());
   }
 
   function startEdit(entity: TEntity) {
     setEditingId(entity.id);
+    setEditingVersion(entity.version);
+    setConflict(false);
     setDraft(toDraft(entity));
     setProblems([]);
+  }
+
+  // Stale-version 409: the only way forward is the user's explicit Reload,
+  // which replaces the draft (and its version) with the server's row.
+  async function handleReload() {
+    if (!editingId) {
+      return;
+    }
+    setReloading(true);
+    try {
+      const latest = await reload(editingId);
+      if (latest) {
+        startEdit(latest);
+      } else {
+        resetForm();
+        setProblems([describeDeleted(noun)]);
+      }
+    } catch {
+      // The failed read shows as the page's load alert; the conflict (and the
+      // user's edits) stay so Reload can be tried again.
+    } finally {
+      setReloading(false);
+    }
   }
 
   async function handleSubmit() {
@@ -94,12 +128,19 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
       setProblems(result.errors);
       return;
     }
+    const action = editingId ? 'update' : 'create';
     try {
-      await save(result.value, editingId ?? undefined);
+      await save(result.value, editingId ?? undefined, editingId ? editingVersion : undefined);
       setProblems([]);
       resetForm();
     } catch (err) {
-      setProblems([describeWriteFailure(err, noun, editingId ? 'update' : 'create')]);
+      if (isChangedElsewhere(err, action)) {
+        // Keep the draft as typed; never retry (a blind retry is the lost update).
+        setProblems([]);
+        setConflict(true);
+        return;
+      }
+      setProblems([describeWriteFailure(err, noun, action)]);
       // An update's 404 means the row is gone: leave edit mode. A create's
       // 404 is the person — keep the draft so nothing typed is lost.
       if (editingId && errorStatus(err) === 404) {
@@ -162,6 +203,7 @@ function SectionPageBody<TEntity extends { id: string }, TInput, TDraft>({
         })}
       </ul>
       <ProblemsAlert problems={problems} />
+      {conflict && <ConflictAlert onReload={() => void handleReload()} disabled={reloading || loading} />}
       {/* Writes wait for the load: the store refuses them mid-load anyway. */}
       <fieldset className={styles.writes} disabled={loading}>
         <Form

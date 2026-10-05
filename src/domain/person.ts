@@ -5,9 +5,15 @@ export interface Person {
   email: string;
   location?: string;
   summary?: string;
+  /**
+   * Optimistic-concurrency token (contract rule 8): 0 on create, bumped by every
+   * successful PUT. Optional because a pre-T-113 server does not send it.
+   */
+  version?: number;
 }
 
-export type PersonInput = Omit<Person, 'id'>;
+/** What a form edits and POST/PUT send. The version travels beside it, on update only. */
+export type PersonInput = Omit<Person, 'id' | 'version'>;
 
 export function emptyPersonInput(): PersonInput {
   return {

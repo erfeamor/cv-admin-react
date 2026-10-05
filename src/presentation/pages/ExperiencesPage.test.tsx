@@ -206,6 +206,114 @@ describe('ExperiencesPage', () => {
     expect(screen.getByRole('heading', { name: 'New experience' })).toBeInTheDocument();
   });
 
+  describe('stale version (T-303)', () => {
+    const versionedPast = { ...past, version: 2 };
+
+    it('a PUT carries the version the row was read with', async () => {
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === BASE) return { status: 200, body: [current, versionedPast] };
+        if (method === 'PUT' && path === `${BASE}/1`) return { status: 200, body: { ...versionedPast, version: 3 } };
+        return undefined;
+      });
+
+      renderPage();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Backend Engineer at ACME' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1));
+      expect(recordedRequests(fetchMock, 'PUT')[0].body).toMatchObject({ company: 'ACME', version: 2 });
+    });
+
+    it('a PUT for a row without a version (pre-T-113 server) sends no version key', async () => {
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === BASE) return { status: 200, body: [current, past] };
+        if (method === 'PUT' && path === `${BASE}/1`) return { status: 200, body: past };
+        return undefined;
+      });
+
+      renderPage();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Backend Engineer at ACME' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1));
+      expect(recordedRequests(fetchMock, 'PUT')[0].body).not.toHaveProperty('version');
+    });
+
+    it('a 409 says the entry changed elsewhere and keeps the edits; Reload shows the server values and the new version', async () => {
+      const changed = { ...versionedPast, company: 'ACME Corp', version: 3 };
+      let listed: unknown[] = [current, versionedPast];
+      const fetchMock = mockFetch((method, path) => {
+        if (method === 'GET' && path === BASE) return { status: 200, body: listed };
+        if (method === 'PUT' && path === `${BASE}/1`) {
+          return recordedRequests(fetchMock, 'PUT').length === 1
+            ? { status: 409, body: { type: 'about:blank', title: 'Conflict', status: 409 } }
+            : { status: 200, body: { ...changed, version: 4 } };
+        }
+        return undefined;
+      });
+
+      renderPage();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Backend Engineer at ACME' }));
+      fireEvent.change(screen.getByLabelText('Company'), { target: { value: 'My edit' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText('This entry was changed elsewhere.')).toBeInTheDocument();
+      expect(screen.getByLabelText('Company')).toHaveValue('My edit');
+      expect(screen.getByRole('heading', { name: 'Edit experience' })).toBeInTheDocument();
+      expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(1); // never retried
+
+      listed = [current, changed];
+      fireEvent.click(screen.getByRole('button', { name: 'Reload and discard my edits' }));
+
+      await waitFor(() => expect(screen.getByLabelText('Company')).toHaveValue('ACME Corp'));
+      expect(screen.queryByText('This entry was changed elsewhere.')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Edit experience' })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(recordedRequests(fetchMock, 'PUT')).toHaveLength(2));
+      expect(recordedRequests(fetchMock, 'PUT')[1].body).toMatchObject({ company: 'ACME Corp', version: 3 });
+    });
+
+    it('Reload after a 409 finds the row deleted: says so and leaves edit mode', async () => {
+      let listed: unknown[] = [current, versionedPast];
+      mockFetch((method, path) => {
+        if (method === 'GET' && path === BASE) return { status: 200, body: listed };
+        if (method === 'PUT' && path === `${BASE}/1`) return { status: 409, body: { status: 409 } };
+        return undefined;
+      });
+
+      renderPage();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Backend Engineer at ACME' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await screen.findByText('This entry was changed elsewhere.');
+
+      listed = [current];
+      fireEvent.click(screen.getByRole('button', { name: 'Reload and discard my edits' }));
+
+      expect(await screen.findByText(/This experience no longer exists/)).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('This experience no longer exists');
+      expect(screen.queryByText('This entry was changed elsewhere.')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'New experience' })).toBeInTheDocument();
+    });
+
+    it('Cancel after a 409 clears the conflict', async () => {
+      mockFetch((method, path) => {
+        if (method === 'GET' && path === BASE) return { status: 200, body: [current, versionedPast] };
+        if (method === 'PUT' && path === `${BASE}/1`) return { status: 409, body: { status: 409 } };
+        return undefined;
+      });
+
+      renderPage();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Backend Engineer at ACME' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await screen.findByText('This entry was changed elsewhere.');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByText('This entry was changed elsewhere.')).not.toBeInTheDocument();
+    });
+  });
+
   it('a POST answered 404 (person deleted) says so and keeps the draft', async () => {
     mockFetch((method, path) => {
       if (method === 'GET' && path === BASE) return { status: 200, body: [past] };

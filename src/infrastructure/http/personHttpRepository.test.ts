@@ -83,11 +83,39 @@ describe('personHttpRepository', () => {
       json: async () => ({ id: '1', ...input }),
     });
 
-    await repositoryWithToken().update('1', input);
+    await repositoryWithToken().update('1', input, undefined);
 
     const [url, options] = (global.fetch as jest.Mock).mock.calls[0];
     expect(url).toBe('/api/v1/people/1');
     expect(options.method).toBe('PUT');
+  });
+
+  it('PUT sends the known version and returns the new one (T-303)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 1, fullName: 'Jane', email: 'j@example.com', version: 5 }),
+    });
+
+    const saved = await repositoryWithToken().update('1', { fullName: 'Jane', email: 'j@example.com' }, 4);
+
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({ fullName: 'Jane', email: 'j@example.com', version: 4 });
+    expect(saved.version).toBe(5);
+  });
+
+  it('PUT omits the version key when it is unknown', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 1, fullName: 'Jane', email: 'j@example.com' }),
+    });
+
+    await repositoryWithToken().update('1', { fullName: 'Jane', email: 'j@example.com' }, undefined);
+
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(options.body).not.toContain('version');
+    expect(JSON.parse(options.body)).toEqual({ fullName: 'Jane', email: 'j@example.com' });
   });
 
   it('removes with DELETE and resolves on 204', async () => {

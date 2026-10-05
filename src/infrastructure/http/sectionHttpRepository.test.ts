@@ -71,11 +71,47 @@ describe('section HTTP repositories', () => {
     it('updates with PUT (200) to the row path and the token', async () => {
       global.fetch = respond(200, { id: 4 });
 
-      await factory(client()).update('7', '4', {} as never);
+      await factory(client()).update('7', '4', {} as never, undefined);
 
       expect(lastCall().url).toBe(`${base}/4`);
       expect(lastCall().options.method).toBe('PUT');
       expect(lastCall().options.headers.Authorization).toBe('Bearer test-token');
+    });
+
+    it('keeps the row version from a list (contract rule 8)', async () => {
+      global.fetch = respond(200, [{ id: 9, version: 3 }]);
+
+      const [listed] = await factory(client()).list('7');
+
+      expect(listed).toMatchObject({ id: '9', version: 3 });
+    });
+
+    it('PUT sends the known version in the body (T-303)', async () => {
+      global.fetch = respond(200, { id: 4, version: 3 });
+
+      const saved = await factory(client()).update('7', '4', {} as never, 2);
+
+      expect(JSON.parse(lastCall().options.body as string)).toEqual({ version: 2 });
+      expect(saved).toMatchObject({ id: '4', version: 3 });
+    });
+
+    it('PUT omits the version key when it is unknown (today\'s server sends none)', async () => {
+      global.fetch = respond(200, { id: 4 });
+
+      await factory(client()).update('7', '4', {} as never, undefined);
+
+      const raw = lastCall().options.body as string;
+      expect(raw).not.toContain('version');
+      expect(JSON.parse(raw)).not.toHaveProperty('version');
+    });
+
+    it('surfaces a stale version (409 problem+json) as HttpError 409', async () => {
+      global.fetch = respond(409, { type: 'about:blank', title: 'Conflict', status: 409 });
+
+      const error = await factory(client()).update('7', '4', {} as never, 1).catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(HttpError);
+      expect(error).toMatchObject({ status: 409 });
     });
 
     it('removes with DELETE and resolves on 204', async () => {
@@ -90,7 +126,7 @@ describe('section HTTP repositories', () => {
     it('surfaces a 404 (PUT racing a DELETE) as HttpError with status and body', async () => {
       global.fetch = respond(404, 'Not found');
 
-      const error = await factory(client()).update('7', '4', {} as never).catch((err: unknown) => err);
+      const error = await factory(client()).update('7', '4', {} as never, undefined).catch((err: unknown) => err);
 
       expect(error).toBeInstanceOf(HttpError);
       expect(error).toMatchObject({ status: 404, body: 'Not found' });
