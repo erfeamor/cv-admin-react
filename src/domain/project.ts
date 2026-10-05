@@ -14,9 +14,15 @@ export interface Project {
   repoUrl: string | null;
   startDate: string | null;
   endDate: string | null;
+  /**
+   * Optimistic-concurrency token (contract rule 8): 0 on create, bumped by every
+   * successful PUT. Optional because a pre-T-113 server does not send it.
+   */
+  version?: number;
 }
 
-export type ProjectInput = Omit<Project, 'id'>;
+/** Form-owned fields: what POST and PUT send. The version travels beside it, on update only. */
+export type ProjectInput = Omit<Project, 'id' | 'version'>;
 
 export interface ProjectDraft extends PeriodDraft {
   name: string;

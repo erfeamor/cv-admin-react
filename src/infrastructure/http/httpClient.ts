@@ -62,3 +62,12 @@ export function createHttpClient(baseUrl: string, getToken: () => string | null)
     },
   };
 }
+
+/**
+ * A PUT body for a versioned resource (contract rule 8): the input plus the
+ * version the edit was based on. An unknown version (a pre-T-113 server sends
+ * none) leaves the key out entirely, so the server applies the update unchecked.
+ */
+export function withVersion<TInput extends object>(input: TInput, version: number | undefined): TInput & { version?: number } {
+  return version === undefined ? input : { ...input, version };
+}

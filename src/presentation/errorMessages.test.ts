@@ -1,4 +1,4 @@
-import { describeWriteFailure } from './errorMessages';
+import { CHANGED_ELSEWHERE, describeWriteFailure, isChangedElsewhere } from './errorMessages';
 
 const withStatus = (status: number, body: unknown = null) =>
   Object.assign(new Error(`Request failed with status ${status}`), { status, body });
@@ -38,5 +38,23 @@ describe('describeWriteFailure on create (review round 1, item 2)', () => {
 
   it('a 404 on update keeps the edit-race message', () => {
     expect(describeWriteFailure(withStatus(404), 'experience', 'update')).toMatch(/^This experience no longer exists/);
+  });
+});
+
+describe('the stale-version 409 (T-303) vs other 409s', () => {
+  it('a 409 on update means the entry was changed elsewhere', () => {
+    expect(CHANGED_ELSEWHERE).toBe('This entry was changed elsewhere.');
+    expect(describeWriteFailure(withStatus(409), 'experience', 'update')).toBe(CHANGED_ELSEWHERE);
+    expect(isChangedElsewhere(withStatus(409), 'update')).toBe(true);
+  });
+
+  it('a 409 on create (e.g. the skill catalog duplicate name) is never read as a stale version', () => {
+    expect(isChangedElsewhere(withStatus(409), 'create')).toBe(false);
+    expect(describeWriteFailure(withStatus(409), 'skill', 'create')).not.toBe(CHANGED_ELSEWHERE);
+  });
+
+  it('other statuses on update are not a stale version', () => {
+    expect(isChangedElsewhere(withStatus(404), 'update')).toBe(false);
+    expect(isChangedElsewhere(new Error('Failed to fetch'), 'update')).toBe(false);
   });
 });

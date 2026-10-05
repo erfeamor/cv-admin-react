@@ -2,7 +2,7 @@ import { Education, EducationInput } from '../../domain/education';
 import { Experience, ExperienceInput } from '../../domain/experience';
 import { EducationRepository, ExperienceRepository, ProjectRepository, SectionRepository } from '../../domain/ports';
 import { Project, ProjectInput } from '../../domain/project';
-import { HttpClient } from './httpClient';
+import { HttpClient, withVersion } from './httpClient';
 
 // Contract path segments — note `educations`, not `education`.
 type SectionSegment = 'experiences' | 'educations' | 'projects';
@@ -11,7 +11,7 @@ type SectionSegment = 'experiences' | 'educations' | 'projects';
 // speaks strings. Same translation as personHttpRepository.
 type Dto<TEntity extends { id: string }> = Omit<TEntity, 'id'> & { id: number | string };
 
-function createSectionHttpRepository<TEntity extends { id: string }, TInput>(
+function createSectionHttpRepository<TEntity extends { id: string }, TInput extends object>(
   client: HttpClient,
   segment: SectionSegment,
 ): SectionRepository<TEntity, TInput> {
@@ -28,11 +28,11 @@ function createSectionHttpRepository<TEntity extends { id: string }, TInput>(
           body: JSON.stringify(input),
         }),
       ),
-    update: async (personId, id, input) =>
+    update: async (personId, id, input, version) =>
       toEntity(
         await client.request<Dto<TEntity>>(`${collection(personId)}/${id}`, {
           method: 'PUT',
-          body: JSON.stringify(input),
+          body: JSON.stringify(withVersion(input, version)),
         }),
       ),
     remove: (personId, id) =>
