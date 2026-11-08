@@ -191,6 +191,15 @@ class CI(unittest.TestCase):
         self.assertIn("curl -fsS --retry 6 --retry-delay 5 --retry-all-errors", r)
         self.assertIn("dist/assets", r)
 
+    def test_smoke_retries_until_deadline(self):
+        r = find_step(self.deploy, "https://erfeamor.com/admin/")["run"]
+        self.assertRegex(r, r"(?m)^\s*(while|until)\b")
+        self.assertIn("sleep 10", r)
+        self.assertIn("deadline", r.lower())
+        self.assertIn("Cache-Control: no-cache", r)
+        self.assertIn("::error::", r)
+        self.assertNotIn("?", r.split("https://erfeamor.com/admin/")[1].split()[0])
+
     def test_no_untrusted_interpolation_in_run(self):
         for job in (self.test, self.deploy):
             for r in runs(job):

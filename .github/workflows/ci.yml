@@ -139,21 +139,39 @@ jobs:
           --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}"
           --paths "/admin/*"
 
-      # The served index.html must reference an asset we just built.
+      # CloudFront invalidations take tens of seconds, so the edge may still
+      # serve the previous index.html for a while. Retry until every
+      # /admin/assets/ reference in the served page exists in this build, or
+      # fail after a ~3 minute deadline.
       - name: Smoke test https://erfeamor.com/admin/
         run: |
-          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors \
-            -o served.html https://erfeamor.com/admin/
-          assets=$(grep -oE '/admin/assets/[^"]+' served.html | sort -u)
-          if [ -z "$assets" ]; then
-            echo "::error::served index.html references no /admin/assets/ file"
-            exit 1
-          fi
-          for a in $assets; do
-            f="dist/assets/${a#/admin/assets/}"
-            if [ ! -f "$f" ]; then
-              echo "::error::served index.html references $a, not in the built dist/assets"
+          deadline=$((SECONDS + 180))
+          status=000
+          bad=""
+          while true; do
+            status=$(curl -fsS --retry 6 --retry-delay 5 --retry-all-errors \
+              -H 'Cache-Control: no-cache' -o served.html -w '%{http_code}' \
+              https://erfeamor.com/admin/ || true)
+            bad=""
+            if [ "$status" = "200" ]; then
+              refs=$(grep -oE '/admin/assets/[^"]+' served.html | sort -u)
+              if [ -z "$refs" ]; then
+                bad="(no /admin/assets/ references in served index.html)"
+              fi
+              for a in $refs; do
+                if [ ! -f "dist/assets/${a#/admin/assets/}" ]; then
+                  bad="$bad $a"
+                fi
+              done
+              if [ -z "$bad" ]; then
+                echo "OK: served index.html matches the build"
+                exit 0
+              fi
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::deadline passed; last HTTP status $status; served refs not in this build:$bad"
               exit 1
             fi
+            echo "Edge not updated yet (status $status), retrying in 10s"
+            sleep 10
           done
-          echo "OK: served index.html matches the build"
