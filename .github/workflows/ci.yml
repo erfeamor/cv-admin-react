@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Least privilege by default; only the deploy job widens this (OIDC token).
+permissions:
+  contents: read
+
+# PR runs cancel superseded runs of the same ref; master runs never cancel.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+      # VITE_* values are baked in at build time (none are secrets). The empty
+      # VITE_DOMAIN_SERVICE_URL makes API calls same-origin, served by
+      # CloudFront's /api/* behavior. It must stay explicitly empty: unset, the
+      # src/store.ts `??` fallback puts http://localhost:8080 in the bundle.
+      # The guard below fails the run if that ever happens.
+      - name: Build
+        env:
+          VITE_COGNITO_USER_POOL_ID: eu-west-3_0pjSduVeP
+          VITE_COGNITO_CLIENT_ID: 9pd7rt69u0072dtg0lbjpqq0q
+          VITE_COGNITO_HOSTED_UI_DOMAIN: cv-project-dev.auth.eu-west-3.amazoncognito.com
+          VITE_DOMAIN_SERVICE_URL: ""
+        run: npm run build
+
+      - name: Fail if dist/ references localhost:8080
+        run: |
+          if grep -rn "localhost:8080" dist/; then
+            echo "::error::dist/ contains localhost:8080 — the bundle would call the visitor's machine"
+            exit 1
+          fi
+
+      # Compiles every story; catches stories drifting from component props.
+      # Storybook is a build gate only, not deployed.
+      - run: npm run build-storybook
+
+      - name: Structural tests (workflows)
+        run: |
+          python3 -c 'import yaml' || pip install --user pyyaml
+          python3 -m unittest discover -s scripts/tests -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  # Publishes the tested dist/ to the admin/ prefix of the shared frontend
+  # bucket (vite base and the CloudFront spa-router agree on /admin/).
+  # No `environment:` here on purpose: it would change the OIDC subject, and
+  # the deploy role trusts exactly repo:erfeamor/cv-admin-react:ref:refs/heads/master.
+  # The role can only write/delete under admin/ and create invalidations; it
+  # cannot read objects, so nothing below reads from S3.
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # GitHub OIDC -> sts:AssumeRoleWithWebIdentity
+      contents: read
+    # Never run two deploys against the bucket at once; queue, don't cancel.
+    concurrency:
+      group: deploy-cv-admin-react
+      cancel-in-progress: false
+    env:
+      AWS_REGION: eu-west-3
+      S3_BUCKET: cv-project-frontend-dev
+      CLOUDFRONT_DISTRIBUTION_ID: E2AV0INGJW1UO2
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Fail if dist/ references localhost:8080
+        run: |
+          if grep -rn "localhost:8080" dist/; then
+            echo "::error::dist/ contains localhost:8080 — refusing to deploy"
+            exit 1
+          fi
+
+      - name: Require the deploy role variable
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::error::repo variable AWS_DEPLOY_ROLE_ARN is not set"
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # Two passes so caching can differ by file:
+      # 1) everything except index.html (content-hashed assets/) is long-cached
+      #    and immutable; uploaded first and without --delete, so the new
+      #    index.html never points at assets that aren't there yet.
+      # 2) index.html with no-cache, plus --delete to prune stale hashed assets
+      #    under admin/. Files pass 1 just uploaded are skipped by pass 2.
+      - name: Sync hashed assets (long cache)
+        run: >
+          aws s3 sync dist/ "s3://${S3_BUCKET}/admin/"
+          --exclude index.html
+          --cache-control "public, max-age=31536000, immutable"
+
+      - name: Sync index.html (no-cache) and prune stale files
+        run: >
+          aws s3 sync dist/ "s3://${S3_BUCKET}/admin/"
+          --delete
+          --cache-control "no-cache"
+
+      - name: Invalidate CloudFront
+        run: >
+          aws cloudfront create-invalidation
+          --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}"
+          --paths "/admin/*"
+
+      # The served index.html must reference an asset we just built.
+      - name: Smoke test https://erfeamor.com/admin/
+        run: |
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors \
+            -o served.html https://erfeamor.com/admin/
+          assets=$(grep -oE '/admin/assets/[^"]+' served.html | sort -u)
+          if [ -z "$assets" ]; then
+            echo "::error::served index.html references no /admin/assets/ file"
+            exit 1
+          fi
+          for a in $assets; do
+            f="dist/assets/${a#/admin/assets/}"
+            if [ ! -f "$f" ]; then
+              echo "::error::served index.html references $a, not in the built dist/assets"
+              exit 1
+            fi
+          done
+          echo "OK: served index.html matches the build"
