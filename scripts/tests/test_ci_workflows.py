@@ -58,7 +58,9 @@ class CI(unittest.TestCase):
     def test_pr_concurrency_cancels_but_master_does_not(self):
         c = self.wf["concurrency"]
         self.assertIn("github.ref", c["group"])
-        self.assertIn("pull_request", str(c["cancel-in-progress"]))
+        self.assertEqual(
+            c["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}"
+        )
 
     def test_test_job_basics(self):
         self.assertEqual(self.test["runs-on"], "ubuntu-latest")

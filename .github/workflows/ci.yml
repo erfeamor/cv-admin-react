@@ -10,7 +10,8 @@ on:
 permissions:
   contents: read
 
-# PR runs cancel superseded runs of the same ref; master runs never cancel.
+# Superseded PR runs of the same ref are cancelled. Master runs are never
+# cancelled by this group (a later run just waits for the earlier one).
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -80,7 +81,10 @@ jobs:
     permissions:
       id-token: write # GitHub OIDC -> sts:AssumeRoleWithWebIdentity
       contents: read
-    # Never run two deploys against the bucket at once; queue, don't cancel.
+    # Never run two deploys against the bucket at once. A running deploy is never
+    # cancelled; GitHub keeps only one pending run per group, so a newer push
+    # replaces a queued (not yet started) one and the last deploy is always the
+    # latest commit.
     concurrency:
       group: deploy-cv-admin-react
       cancel-in-progress: false
