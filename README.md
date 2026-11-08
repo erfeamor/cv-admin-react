@@ -2,7 +2,7 @@
 
 Admin CRUD UI for the Currículum Interactivo project. Talks directly to [cv-domain-service](../cv-domain-service), bypassing the BFF, since it needs full CRUD rather than the aggregated shape the public site consumes.
 
-Part of the [cv-project](../README.md) multi-repo. Pipeline: DroneCI.
+Part of the [cv-project](../README.md) multi-repo. Pipeline: GitHub Actions.
 
 ## Stack
 

@@ -15,9 +15,13 @@ npm run storybook          # component workbench on :6006
 npm run build-storybook    # static Storybook (CI gate only, not deployed)
 ```
 
-CI: `.drone.yml` (install → lint → typecheck → test → build → build-storybook, sequential to fit the 1 GB Drone runner host; master pushes then deploy to S3 `/admin/` + CloudFront invalidation).
+CI: GitHub Actions, `.github/workflows/ci.yml` (T-305; replaced Drone). Runs on push to and PRs against `master`, Node 22, least-privilege `contents: read`.
 
-The deploy step's secrets (`aws_access_key_id`, `aws_secret_access_key`) belong to the `cv-project-drone-deploy` IAM user. Since T-008 (2026-09-28) the key is **Terraform-managed** and its source of truth is SSM (`/cv-project/dev/deploy/drone-deploy/*`), not the Drone UI. After any Drone rebuild or key rotation, set them with `cv-infra/scripts/drone-reseed-secrets.sh`, following the runbook `cv-infra/docs/drone-host-backup-and-cutover.md`. Don't hand-edit them in the Drone UI. Since T-007 (2026-09-29) Drone runs with `DRONE_DATABASE_SECRET`, so these secrets are encrypted at rest in its database.
+- Job `test`: `npm ci` → lint → typecheck → test → build → guard → `build-storybook` → structural tests, then uploads `dist/` (1-day artifact). The build bakes in the `VITE_COGNITO_*` values and an **explicitly empty** `VITE_DOMAIN_SERVICE_URL` (same-origin API calls via CloudFront `/api/*`); unset, `src/store.ts`'s `??` fallback would ship `http://localhost:8080`. A guard step fails the job if `dist/` contains `localhost:8080`; the deploy job re-runs it.
+- Job `deploy` (master pushes only, `needs: test`, no `environment:` because that changes the OIDC subject): assumes the role in repo variable `AWS_DEPLOY_ROLE_ARN` via GitHub OIDC (cv-infra T-063; trusts exactly `repo:erfeamor/cv-admin-react:ref:refs/heads/master`; it may only write/delete under `admin/`, list that prefix, and invalidate the distribution, so it cannot read objects). Two `aws s3 sync` passes into `s3://cv-project-frontend-dev/admin/`: hashed assets with `public, max-age=31536000, immutable` and no `--delete`, then everything else (`index.html`) with `no-cache` and `--delete`. Then `create-invalidation` of `/admin/*` and a smoke test that `https://erfeamor.com/admin/` serves an `index.html` whose assets exist in the build.
+- Workflow structure is guarded by `python3 -m unittest discover -s scripts/tests -v` (PyYAML; also a CI step). Change the workflow and the tests together.
+
+The old Drone deploy key (IAM user `cv-project-drone-deploy`) is unused now; it is removed with the CI host by T-064.
 
 Storybook (`.storybook/`, framework `@storybook/react-vite`, addons docs + a11y): co-located `*.stories.tsx` per presentation component. Controlled components get a stateful harness in the story file (`PersonForm.stories.tsx` pattern); interaction tests are play functions using `storybook/test`. Jest remains the only CI test runner — stories are compile-checked by `build-storybook`, and play functions run in the Storybook UI.
 
