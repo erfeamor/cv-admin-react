@@ -81,11 +81,15 @@ class CI(unittest.TestCase):
         env = next(s for s in self.test["steps"] if s.get("run", "").strip() == "npm run build")["env"]
         self.assertEqual(env["VITE_COGNITO_USER_POOL_ID"], "eu-west-3_0pjSduVeP")
         self.assertEqual(env["VITE_COGNITO_CLIENT_ID"], "9pd7rt69u0072dtg0lbjpqq0q")
-        self.assertEqual(
-            env["VITE_COGNITO_HOSTED_UI_DOMAIN"], "cv-project-dev.auth.eu-west-3.amazoncognito.com"
-        )
+        # Cognito custom domain (T-062/T-306), not the prefix domain.
+        self.assertEqual(env["VITE_COGNITO_HOSTED_UI_DOMAIN"], "auth.erfeamor.com")
         self.assertIn("VITE_DOMAIN_SERVICE_URL", env)
         self.assertEqual(env["VITE_DOMAIN_SERVICE_URL"], "")
+
+    def test_no_cognito_prefix_domain_anywhere(self):
+        # T-306: the prefix domain (cv-project-dev.auth.<region>.amazoncognito.com)
+        # is being deleted in cv-infra; nothing in the workflow may still use it.
+        self.assertNotIn("amazoncognito.com", self.text)
 
     def test_localhost_guard_in_both_jobs(self):
         for job in (self.test, self.deploy):
