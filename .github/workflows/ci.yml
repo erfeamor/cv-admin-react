@@ -42,7 +42,7 @@ jobs:
         env:
           VITE_COGNITO_USER_POOL_ID: eu-west-3_0pjSduVeP
           VITE_COGNITO_CLIENT_ID: 9pd7rt69u0072dtg0lbjpqq0q
-          VITE_COGNITO_HOSTED_UI_DOMAIN: cv-project-dev.auth.eu-west-3.amazoncognito.com
+          VITE_COGNITO_HOSTED_UI_DOMAIN: auth.erfeamor.com
           VITE_DOMAIN_SERVICE_URL: ""
         run: npm run build
 
