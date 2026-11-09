@@ -10,7 +10,7 @@ const config: StorybookConfig = {
   // Default react-docgen-typescript type-checks every component's full TS
   // program to build prop tables. It's a real but modest share of the
   // build's memory (~40 MB measured locally) — worth shedding since we don't
-  // use PropTypes/JSDoc-style props anyway; see .drone.yml for the bulk fix.
+  // use PropTypes/JSDoc-style props anyway.
   typescript: {
     reactDocgen: false,
   },
